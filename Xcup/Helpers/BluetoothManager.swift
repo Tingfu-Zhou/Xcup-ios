@@ -65,6 +65,12 @@ class BluetoothManager: NSObject {
     private let PATTERN_2: UInt8 = 2
     private let PATTERN_3: UInt8 = 3
     
+    // [NEW] 手动控制边界常量（协议 §9.1 / §9.2）
+    static let PATTERN_MIN: UInt8 = 1
+    static let PATTERN_MAX: UInt8 = 3
+    static let LEVEL_MIN:   UInt8 = 0
+    static let LEVEL_MAX:   UInt8 = 10
+    
     //private let LEVEL_STOP: UInt8 = 0
     //private let LEVEL_L: UInt8 = 1
     //private let LEVEL_M: UInt8 = 2
@@ -81,16 +87,10 @@ class BluetoothManager: NSObject {
         didSet {
             if isConnected {
                 delegate?.bluetoothDidConnect()
-                // [新增] 调用闭包观察者
-                DispatchQueue.main.async {
-                    self.stateObserver?.onConnect?()
-                }
+                notifyObservers(.connect)
             } else {
                 delegate?.bluetoothDidDisconnect()
-                // [新增] 调用闭包观察者
-                DispatchQueue.main.async {
-                    self.stateObserver?.onDisconnect?()
-                }
+                notifyObservers(.disconnect)
             }
         }
     }
@@ -99,16 +99,10 @@ class BluetoothManager: NSObject {
         didSet {
             if isPausedByLocal {
                 delegate?.bluetoothDidPause()
-                // [新增] 调用闭包观察者
-                DispatchQueue.main.async {
-                    self.stateObserver?.onPause?()
-                }
+                notifyObservers(.pause)
             } else {
                 delegate?.bluetoothDidResume()
-                // [新增] 调用闭包观察者
-                DispatchQueue.main.async {
-                    self.stateObserver?.onResume?()
-                }
+                notifyObservers(.resume)
             }
         }
     }
@@ -118,7 +112,13 @@ class BluetoothManager: NSObject {
     weak var delegate: BluetoothManagerDelegate?
     
     // [新增] 使用闭包替代委托模式，避免 SwiftUI struct 的 weak 引用问题
+    // 主观察者：由主页面（ContentView）持有
     var stateObserver: BluetoothStateObserver?
+    
+    // [NEW] 附加观察者列表：手动电子菜单等二级页面在此登记，
+    // 避免直接覆盖 stateObserver 把主页面的监听顶掉
+    private let observerLock = NSLock()
+    private var extraObservers: [UUID: BluetoothStateObserver] = [:]
     
     // MARK: - Timer
     private var scanTimeoutTimer: Timer?
@@ -198,7 +198,100 @@ class BluetoothManager: NSObject {
         // 等待ACK或StateReport确认恢复
     }
     
+    // MARK: - [NEW] 手动控制（手动电子菜单页面调用）
+    
+    /// 手动下发「变频模式 + 马达强度」
+    /// 帧：SetPattern(0x04)，payload = PATTERN_ID, INT_LEVEL, DURATION_MS=0(持续), FLAGS=1(循环)
+    /// - Parameters:
+    ///   - patternId: 预置模式 1...3（协议 §9.1），越界直接拒绝
+    ///   - intLevel:  强度档位 0...10（协议 §9.2），越界 clamp 而不拒绝
+    /// - Returns: 是否已下发
+    @discardableResult
+    func sendManualPattern(patternId: UInt8, intLevel: UInt8) -> Bool {
+        // 1) 未连接 → 拦下
+        guard isConnected, rxCharacteristic != nil else {
+            print("❌ 手动控制：未连接到设备或未发现写入特征")
+            return false
+        }
+        
+        // 2) 本地按键锁定期内设备只会回 BUSY，客户端先拦下
+        guard !isPausedByLocal else {
+            print("⚠️ 手动控制：设备正在本地按键控制，忽略下发")
+            return false
+        }
+        
+        // 3) 模式越界 → 拒绝；强度 clamp 到 0...10
+        guard patternId >= BluetoothManager.PATTERN_MIN,
+              patternId <= BluetoothManager.PATTERN_MAX else {
+            print("❌ 手动控制：模式越界 patternId=\(patternId)")
+            return false
+        }
+        let level = min(max(intLevel, BluetoothManager.LEVEL_MIN), BluetoothManager.LEVEL_MAX)
+        
+        let frame = buildSetPatternFrame(patternId: patternId, intLevel: level, durationMs: 0, flags: 1)
+        writeToRx(data: frame)
+        print("✅ 手动下发: pattern=\(patternId) level=\(level)")
+        return true
+    }
+    
+    /// 紧急停止：协议规定 StopAll 任何时刻都必须 OK（最高优先），因此不检查本地锁定状态
+    /// - Returns: 是否已下发
+    @discardableResult
+    func sendStopAll() -> Bool {
+        guard isConnected, rxCharacteristic != nil else {
+            print("❌ 紧急停止：未连接到设备或未发现写入特征")
+            return false
+        }
+        
+        writeToRx(data: buildStopAllFrame())
+        print("🛑 已发送紧急停止(StopAll)")
+        return true
+    }
+    
+    // MARK: - [NEW] 状态观察者管理
+    
+    /// 登记一个附加观察者（二级页面使用），返回用于注销的令牌
+    @discardableResult
+    func addStateObserver(_ observer: BluetoothStateObserver) -> UUID {
+        let token = UUID()
+        observerLock.lock()
+        extraObservers[token] = observer
+        observerLock.unlock()
+        return token
+    }
+    
+    /// 注销附加观察者
+    func removeStateObserver(_ token: UUID) {
+        observerLock.lock()
+        extraObservers.removeValue(forKey: token)
+        observerLock.unlock()
+    }
+    
     // MARK: - Private Methods
+    
+    // [NEW] 蓝牙状态事件：统一分发给主观察者与全部附加观察者（均切主线程）
+    private enum StateEvent {
+        case connect, disconnect, pause, resume
+    }
+    
+    private func notifyObservers(_ event: StateEvent) {
+        observerLock.lock()
+        let observers = [stateObserver].compactMap { $0 } + Array(extraObservers.values)
+        observerLock.unlock()
+        
+        guard !observers.isEmpty else { return }
+        
+        DispatchQueue.main.async {
+            for observer in observers {
+                switch event {
+                case .connect:    observer.onConnect?()
+                case .disconnect: observer.onDisconnect?()
+                case .pause:      observer.onPause?()
+                case .resume:     observer.onResume?()
+                }
+            }
+        }
+    }
     
     private func stopScan() {
         if isScanning {

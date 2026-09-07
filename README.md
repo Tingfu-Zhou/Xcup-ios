@@ -17,6 +17,7 @@ Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在�
 - 节律强度估计：根据 PCM 音频生成离散强度档位，并与动作状态一同发送给硬件。
 - 多模态融合：对近期音频与视频结果进行加权、过滤和时间窗口平滑，降低单次误判与状态抖动。
 - BLE 控制：使用 CoreBluetooth 实现自动扫描、连接、协议帧构建、CRC 校验、状态解析和指令发送。
+- 手动电子菜单：在 App 内直接选择变频模式（1-3）与马达强度（0-10 档），无需在设备上轮询实体按键。
 - 本地按键优先：硬件按键可暂停 App 控制，用户可在主界面手动恢复。
 - 播放同步：支持播放、暂停、Seek、播放结束恢复和横竖屏切换；Seek 后会重置历史状态并重新同步分析链路。
 - 应用更新检查：通过远端版本配置判断推荐更新或强制更新，并跳转 App Store。
@@ -83,6 +84,7 @@ flowchart TB
 | `PcmCircularBuffer.swift` | 管理 PCM 环形缓冲、时间窗口读取和并发访问 |
 | `AudioInferenceHelper.swift` | YAMNet 特征提取与自定义音频分类器推理 |
 | `ThreadSafeAnalysisResults.swift` | 在线程之间安全保存和读取分析结果 |
+| `ManualControlView.swift` | 手动电子菜单：模式选择、强度滑杆、紧急停止与下发节流 |
 | `BluetoothManager.swift` | BLE 扫描、连接、协议帧编解码、CRC 校验和状态管理 |
 
 ## 模型规格

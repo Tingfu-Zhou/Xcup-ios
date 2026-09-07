@@ -131,6 +131,36 @@ struct ContentView: View {
                                 .fill(Color.md3Surface)
                         )
 
+                        // [新增] 手动电子菜单入口：在 app 上直接调节模式与强度
+                        NavigationLink(destination: ManualControlView()) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.md3OnPrimaryContainer)
+                                    .frame(width: 40, height: 40)
+                                    .background(Circle().fill(Color.md3PrimaryContainer))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("手动电子菜单")
+                                        .font(MD3Typography.titleMedium)
+                                        .foregroundColor(.md3OnSurface)
+                                    Text("在 app 上直接调节模式与强度")
+                                        .font(MD3Typography.bodySmall)
+                                        .foregroundColor(.md3OnSurfaceVariant)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.md3OnSurfaceVariant)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.md3Surface)
+                            )
+                        }
+                        .buttonStyle(.plain)
+
                         // [新增] 恢复控制按钮
                         Button(action: {
                             handleResumeControl()

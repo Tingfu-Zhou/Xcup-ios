@@ -114,19 +114,35 @@ extension View {
 
 struct MD3TopAppBar: View {
     let title: String
+    /// 传入后左侧显示返回箭头；二级页面（如手动电子菜单）只有箭头、不带标题
+    let onBack: (() -> Void)?
 
-    init(_ title: String = "Xcup") {
+    init(_ title: String = "Xcup", onBack: (() -> Void)? = nil) {
         self.title = title
+        self.onBack = onBack
     }
 
     var body: some View {
-        HStack {
-            Text(title)
-                .font(MD3Typography.headlineSmall)
-                .foregroundColor(.md3OnSurface)
+        HStack(spacing: 4) {
+            if let onBack {
+                Button(action: onBack) {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.md3OnSurface)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("返回"))
+            }
+            if !title.isEmpty {
+                Text(title)
+                    .font(MD3Typography.headlineSmall)
+                    .foregroundColor(.md3OnSurface)
+            }
             Spacer()
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, onBack == nil ? 16 : 8)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
         .background(Color.md3Surface)
