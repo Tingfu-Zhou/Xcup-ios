@@ -10,6 +10,9 @@
 //    · PATTERN_ID：变频模式 1...3（BLE 协议 §9.1）
 //    · INT_LEVEL ：马达强度 0...10，0 为停止（BLE 协议 §9.2）
 //
+//  变频模式的选择同时作用于视频分析模式：分析链路只决定「转 / 不转」与强度档位，
+//  「怎么转」以本页面的选择为准，两边共用 BluetoothManager.patternDefaultsKey 这一份存储。
+//
 
 import SwiftUI
 import UIKit
@@ -35,8 +38,8 @@ struct ManualControlView: View {
     /// 拖动滑杆时的最小下发间隔
     private static let sendThrottleInterval: TimeInterval = 0.15
 
-    /// 只记忆上次选择的模式；强度一律从 0 开始，避免一进页面就意外启动
-    private static let patternDefaultsKey = "manual_control_pattern_id"
+    // 只记忆上次选择的模式；强度一律从 0 开始，避免一进页面就意外启动。
+    // 持久化键定义在 BluetoothManager.patternDefaultsKey，视频分析链路读的是同一份。
 
     private static let patternIds: [UInt8] = Array(BluetoothManager.PATTERN_MIN...BluetoothManager.PATTERN_MAX)
 
@@ -179,6 +182,11 @@ struct ManualControlView: View {
                 .font(MD3Typography.bodySmall)
                 .foregroundColor(.md3OnSurfaceVariant)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Text("该模式同时用于视频分析模式：分析只决定「转 / 不转」与强度档位，转动方式（正转 / 反转节拍）以这里的选择为准。")
+                .font(MD3Typography.bodySmall)
+                .foregroundColor(.md3OnSurfaceVariant)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -305,11 +313,11 @@ struct ManualControlView: View {
     // MARK: - 生命周期
 
     private func handleAppear() {
-        // 只从本地存储恢复上次选的模式
-        let saved = UserDefaults.standard.integer(forKey: Self.patternDefaultsKey)
-        if saved >= Int(BluetoothManager.PATTERN_MIN), saved <= Int(BluetoothManager.PATTERN_MAX) {
-            patternId = UInt8(saved)
-        }
+        // 只从本地存储恢复上次选的模式（与视频分析模式共用同一份选择）
+        let saved = UserDefaults.standard.integer(forKey: BluetoothManager.patternDefaultsKey)
+        patternId = BluetoothManager.clampPattern(UInt8(clamping: saved))
+        // 兜底：把恢复出来的模式同步给 BLE 层，保证视频分析链路用的是同一个选择
+        BluetoothManager.shared.setAnalysisPattern(patternId)
         // 强度一律从 0 开始，避免一进页面就意外启动
         level = 0
 
@@ -358,14 +366,24 @@ struct ManualControlView: View {
     private func selectPattern(_ id: UInt8) {
         guard id != patternId else { return }
         patternId = id
-        UserDefaults.standard.set(Int(id), forKey: Self.patternDefaultsKey)
+        UserDefaults.standard.set(Int(id), forKey: BluetoothManager.patternDefaultsKey)
 
         // 当前强度为 0 时只更新界面不下发，避免在停止状态下唤醒马达
-        guard levelIndex > 0 else {
-            statusText = "已切换到模式 \(id)（强度为 0，未下发）"
-            return
+        let sendsManually = levelIndex > 0
+        if sendsManually {
+            flushPendingSend()
         }
-        flushPendingSend()
+
+        // 同步给视频分析链路。放在手动下发之后：手动下发已把「分析正在转」的标记清零，
+        // 这里就不会为同一次切换重复补发一帧。
+        // 反过来，本页强度为 0（刚进页面）而分析正在驱动转动时，由这里补发让新模式立刻生效。
+        let analysisResent = BluetoothManager.shared.setAnalysisPattern(id)
+
+        if !sendsManually {
+            statusText = analysisResent
+                ? "已切换到模式 \(id)，视频分析正在运行，已即时生效"
+                : "已切换到模式 \(id)（强度为 0，未下发）"
+        }
     }
 
     private func emergencyStop() {

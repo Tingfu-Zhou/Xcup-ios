@@ -71,6 +71,15 @@ class BluetoothManager: NSObject {
     static let LEVEL_MIN:   UInt8 = 0
     static let LEVEL_MAX:   UInt8 = 10
     
+    /// [NEW] 变频模式的持久化键。手动电子菜单与视频分析模式共用同一份选择，
+    /// 用户只需在一个地方选「怎么转」，两条链路语义一致。
+    static let patternDefaultsKey = "manual_control_pattern_id"
+    
+    /// [NEW] 把变频模式号钳制到 1...3（协议 §9.1）
+    static func clampPattern(_ patternId: UInt8) -> UInt8 {
+        return min(max(patternId, PATTERN_MIN), PATTERN_MAX)
+    }
+    
     //private let LEVEL_STOP: UInt8 = 0
     //private let LEVEL_L: UInt8 = 1
     //private let LEVEL_M: UInt8 = 2
@@ -108,6 +117,18 @@ class BluetoothManager: NSObject {
     }
     private var seq: UInt8 = 0
     
+    // MARK: - [NEW] 视频分析模式使用的变频模式
+    //
+    // 视频分析链路只决定「转 / 不转」与强度档位，「怎么转」由用户在手动电子菜单里选，
+    // 两个页面读写同一份 UserDefaults，所以选一次即同时生效。
+    //
+    // 线程：分析链路的 sendAction 主要跑在融合循环（主线程），但暂停逻辑可能在
+    // Darwin 通知线程调用，而 setter 来自 SwiftUI 主线程，因此下面两个字段统一加锁访问。
+    private let analysisLock = NSLock()
+    private var _analysisPattern: UInt8 = BluetoothManager.PATTERN_MIN
+    /// 最近一次 sendAction（视频分析链路）下发的是否为「转」；手动下发 / StopAll / 断开会清零
+    private var _analysisRunning = false
+    
     // MARK: - Delegate
     weak var delegate: BluetoothManagerDelegate?
     
@@ -126,6 +147,10 @@ class BluetoothManager: NSObject {
     // MARK: - Initialization
     private override init() {
         super.init()
+        // [NEW] 从手动电子菜单同一份持久化存储读取，缺省 0 会被钳制为模式 1（只有正转），
+        // 全新安装时行为与改动前完全一致。
+        let saved = UserDefaults.standard.integer(forKey: BluetoothManager.patternDefaultsKey)
+        _analysisPattern = BluetoothManager.clampPattern(UInt8(clamping: saved))
         centralManager = CBCentralManager(delegate: self, queue: nil)
     }
     
@@ -165,6 +190,7 @@ class BluetoothManager: NSObject {
         rxCharacteristic = nil
         txCharacteristic = nil
         isPausedByLocal = false  // [NEW] 断开时清除暂停状态
+        setAnalysisRunning(false)  // [NEW] 断开后分析链路不再驱动转动
     }
     
     var LEVEL: UInt8 = 0
@@ -184,7 +210,9 @@ class BluetoothManager: NSObject {
         
         if let frame = buildFrameForAction(action) {
             writeToRx(data: frame)
-            print("✅ 发送动作: \(action)")
+            // [NEW] 记录分析链路当前是否正在驱动转动，供切换变频模式时判断要不要补发
+            setAnalysisRunning(action != "Noise")
+            print("✅ 发送动作: \(action), pattern=\(analysisPattern), level=\(LEVEL)")
         }
     }
     
@@ -230,6 +258,8 @@ class BluetoothManager: NSObject {
         
         let frame = buildSetPatternFrame(patternId: patternId, intLevel: level, durationMs: 0, flags: 1)
         writeToRx(data: frame)
+        // [NEW] 手动接管后清零，避免分析链路的补发逻辑再插一脚
+        setAnalysisRunning(false)
         print("✅ 手动下发: pattern=\(patternId) level=\(level)")
         return true
     }
@@ -244,8 +274,56 @@ class BluetoothManager: NSObject {
         }
         
         writeToRx(data: buildStopAllFrame())
+        setAnalysisRunning(false)  // [NEW] 已停机，分析链路不再驱动转动
         print("🛑 已发送紧急停止(StopAll)")
         return true
+    }
+    
+    // MARK: - [NEW] 视频分析模式的变频模式
+    
+    /// 视频分析模式当前使用的变频模式（1...3）
+    var analysisPattern: UInt8 {
+        analysisLock.lock()
+        defer { analysisLock.unlock() }
+        return _analysisPattern
+    }
+    
+    /// 设置视频分析模式使用的变频模式（手动电子菜单选择后调用）
+    /// - Parameter patternId: 预置模式，越界 clamp 到 1...3
+    /// - Returns: 是否为了让新模式立即生效而补发了一帧
+    @discardableResult
+    func setAnalysisPattern(_ patternId: UInt8) -> Bool {
+        let p = BluetoothManager.clampPattern(patternId)
+        
+        analysisLock.lock()
+        if p == _analysisPattern {
+            analysisLock.unlock()
+            return false
+        }
+        _analysisPattern = p
+        let running = _analysisRunning
+        analysisLock.unlock()
+        
+        // 只有当前正由视频分析驱动转动，才立即补发一帧让新模式生效；
+        // 不转时只记下来，下一次发送自然带上，避免在停机状态下把马达唤醒。
+        // 本地按键锁定期内设备只会回 BUSY，所以也要带上「未被锁定」这个条件。
+        let canResend =
+            running && LEVEL > 0 &&
+            isConnected && !isPausedByLocal &&
+            rxCharacteristic != nil && peripheral != nil
+        guard canResend else { return false }
+        
+        // 与分析链路的「转」帧保持一致：DURATION=0 持续、FLAGS bit0=1 循环
+        writeToRx(data: buildSetPatternFrame(patternId: p, intLevel: LEVEL, durationMs: 0, flags: 1))
+        print("✅ 视频分析变频模式切换，已补发: pattern=\(p) level=\(LEVEL)")
+        return true
+    }
+    
+    /// 记录分析链路当前是否正在驱动转动
+    private func setAnalysisRunning(_ running: Bool) {
+        analysisLock.lock()
+        _analysisRunning = running
+        analysisLock.unlock()
     }
     
     // MARK: - [NEW] 状态观察者管理
@@ -315,15 +393,18 @@ class BluetoothManager: NSObject {
     // MARK: - Frame Building
     
     private func buildFrameForAction(_ action: String) -> Data? {
+        // [NEW] PATTERN_ID 取用户在手动电子菜单里选的变频模式，不再写死：
+        // 分析只决定「转 / 不转」与强度档位，转动方式以用户的选择为准。
+        let pattern = analysisPattern
         switch action {
         case "oral": // 映射为"001": 插定-低，持续2s
-            return buildSetPatternFrame(patternId: PATTERN_1, intLevel: LEVEL, durationMs: 2000, flags: 0)
+            return buildSetPatternFrame(patternId: pattern, intLevel: LEVEL, durationMs: 2000, flags: 0)
         //case "dofast": // 映射为"002": 脉冲-中，持续2s
             //return buildSetPatternFrame(patternId: PATTERN_2, intLevel: LEVEL, durationMs: 2000, flags: 0)
         case "do": // 映射为"003": 波形-中，循环
-            return buildSetPatternFrame(patternId: PATTERN_3, intLevel: LEVEL, durationMs: 0, flags: 1)
+            return buildSetPatternFrame(patternId: pattern, intLevel: LEVEL, durationMs: 0, flags: 1)
         case "Noise": // 映射为"004": 停止
-            return buildStopAllFrame()
+            return buildStopAllFrame()  // Noise 走 StopAll，pattern 无意义
         default:
             return nil
         }
@@ -586,6 +667,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
         txCharacteristic = nil
         self.peripheral = nil
         isPausedByLocal = false  // [NEW] 断开时清除暂停状态
+        setAnalysisRunning(false)  // [NEW] 断开后分析链路不再驱动转动
     }
 }
 
