@@ -42,6 +42,7 @@ enum AudioRing {
 final class AudioRingReader {
     private var fd: Int32 = -1
     private var base: UnsafeRawPointer?
+    private var lastCursor: Int? = nil   // readNew() 上次读到的写游标
 
     init?(groupID: String = kBroadcastAppGroupID) {
         guard let url = FileManager.default
@@ -60,6 +61,21 @@ final class AudioRingReader {
     deinit {
         if let b = base { munmap(UnsafeMutableRawPointer(mutating: b), AudioRing.fileBytes) }
         if fd >= 0 { close(fd) }
+    }
+
+    /// 读出上次调用之后扩展新写入的全部样本（按写入顺序，连续、不重复、不遗漏）。
+    /// 第一次调用只记下位置、不返回历史数据。两次调用之间写入超过整个环形缓冲（20 秒）时，只能拿到最近的部分。
+    func readNew() -> [Float] {
+        guard let b = base else { return [] }
+        let writeCursor = Int(b.load(fromByteOffset: 0, as: UInt32.self))
+        let cap = AudioRing.capacity
+        defer { lastCursor = writeCursor }
+        guard let last = lastCursor, writeCursor != last, writeCursor < cap else { return [] }
+        let n = ((writeCursor - last) % cap + cap) % cap
+        let data = b.advanced(by: AudioRing.headerBytes).assumingMemoryBound(to: Float.self)
+        var out = [Float](repeating: 0, count: n)
+        for i in 0..<n { out[i] = data[(last + i) % cap] }
+        return out
     }
 
     func readLatest(count: Int) -> [Float]? {

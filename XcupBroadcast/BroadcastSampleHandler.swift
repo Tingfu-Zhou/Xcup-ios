@@ -146,22 +146,33 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
     private var audioWriter: AudioWriter?
     private let videoWriter = VideoWriter()
 
-    // 不再使用 AVAudioConverter，改为离线模式相同的手动提取 + 重采样
     private var lastVideoTime: TimeInterval = 0
     private let VIDEO_INTERVAL: TimeInterval = 0.2
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
     // 诊断：记录首条音频样本（.audioApp 或 .audioMic），只发一次通知
     private var audioRawDiagSent = false
-    // 优先使用麦克风：若 .audioMic 已到达，忽略 .audioApp（避免双路叠加）
-    private var hasMicAudio = false
+
+    // App 音频优先（与 Android 在线模式的 AudioPlaybackCapture 一样抓的是播放的声音）；
+    // 麦克风录的是房间里的声音，只在超过 MIC_FALLBACK_SEC 没收到 App 音频时兜底
+    private var lastAppAudioUptime: TimeInterval = -.infinity
+    private let MIC_FALLBACK_SEC: TimeInterval = 1.0
+
+    // 流式重采样（与离线模式同一个 PcmResampler）：同一来源、同一格式、时间连续时跨块沿用，不丢样本、不重置相位
+    private var resampler: PcmResampler?
+    private var resamplerKey = ""
+    private var resamplerBaseUs: Int64 = 0
+    /// 相邻音频块的 pts 与按样本数推算的时间差超过这个，就当作不连续，重采样器重新起头。
+    private let DISCONTINUITY_US: Int64 = 100_000
 
     // MARK: - 广播生命周期
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         audioWriter = AudioWriter()
         audioRawDiagSent = false
-        hasMicAudio = false
+        lastAppAudioUptime = -.infinity
+        resampler = nil
+        resamplerKey = ""
         if audioWriter == nil {
             print("[XcupBroadcast] ⚠️ AudioWriter 初始化失败，请检查 App Groups 配置")
         }
@@ -183,25 +194,24 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
                                       with type: RPSampleBufferType) {
         guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
         switch type {
+        case .audioApp:
+            // App 音频（播放的声音，与 Android AudioPlaybackCapture 等价）：优先使用
+            lastAppAudioUptime = ProcessInfo.processInfo.systemUptime
+            if !audioRawDiagSent {
+                audioRawDiagSent = true
+                writeDiag("YES(app)", forKey: kDiagAudioRaw)
+                notify(kNotifyAudioRaw)
+            }
+            processAudio(sampleBuffer, source: "app")
         case .audioMic:
-            // 麦克风音频（优先：适用于动作/语音识别场景，与 Android AudioRecord 等价）
-            hasMicAudio = true
+            // 麦克风：只在一段时间没有 App 音频时兜底，避免两路叠加
+            guard ProcessInfo.processInfo.systemUptime - lastAppAudioUptime > MIC_FALLBACK_SEC else { return }
             if !audioRawDiagSent {
                 audioRawDiagSent = true
                 writeDiag("YES(mic)", forKey: kDiagAudioRaw)
                 notify(kNotifyAudioRaw)
             }
-            processAudio(sampleBuffer)
-        case .audioApp:
-            // App 音频（仅在没有麦克风数据时使用，避免两路叠加）
-            if !hasMicAudio {
-                if !audioRawDiagSent {
-                    audioRawDiagSent = true
-                    writeDiag("YES(app)", forKey: kDiagAudioRaw)
-                    notify(kNotifyAudioRaw)
-                }
-                processAudio(sampleBuffer)
-            }
+            processAudio(sampleBuffer, source: "mic")
         case .video:
             processVideo(sampleBuffer)
         default:
@@ -209,12 +219,9 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - 音频处理（离线模式相同思路：直接提取 PCM → 混声 → 手动重采样到 16 kHz）
-    //
-    // 不使用 AVAudioConverter（黑盒，多个失败点）。
-    // 改为：ABL 取原始字节 → 手动 stereo→mono → 线性插值重采样，与 AudioDecoder.swift 逻辑一致。
+    // MARK: - 音频处理：取原始 PCM（按 ASBD 处理字节序 / 交错）→ PcmResampler 下混 + 抗混叠重采样到 16kHz → 共享环形缓冲
 
-    private func processAudio(_ sampleBuffer: CMSampleBuffer) {
+    private func processAudio(_ sampleBuffer: CMSampleBuffer, source: String) {
         guard let fmtDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(fmtDesc) else {
             writeDiag("E1:fmtDesc_nil", forKey: kDiagAudioConv); return
@@ -227,9 +234,15 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
             writeDiag("E2:rate=\(srcRate) ch=\(srcCh) frames=\(numFrames)", forKey: kDiagAudioConv); return
         }
 
-        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
-        let isNonI  = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
-        writeDiag("\(srcRate)Hz \(srcCh)ch float=\(isFloat) nonI=\(isNonI)", forKey: kDiagAudioFmt)
+        let format = ReplayKitPcmFormat(
+            channels: srcCh,
+            bitsPerChannel: asbd.mBitsPerChannel == 0 ? 16 : Int(asbd.mBitsPerChannel),   // 0 按 16 位处理（与旧代码相同）
+            isFloat: (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0,
+            isBigEndian: (asbd.mFormatFlags & kAudioFormatFlagIsBigEndian) != 0,
+            isNonInterleaved: (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0)
+        writeDiag("\(source) \(srcRate)Hz \(srcCh)ch \(format.bitsPerChannel)bit float=\(format.isFloat) "
+                  + "nonI=\(format.isNonInterleaved) bigEndian=\(format.isBigEndian) "
+                  + "flags=0x\(String(asbd.mFormatFlags, radix: 16))", forKey: kDiagAudioFmt)
 
         // ── 1. 两步法获取 ABL：先查询所需大小，再分配并填充（避免 kCMSampleBufferError_ArrayTooSmall）──
         var ablSizeNeeded = 0
@@ -255,94 +268,40 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
             writeDiag("E3:abl=\(ablStatus)", forKey: kDiagAudioConv); return
         }
 
-        let ablWrapper = UnsafeMutableAudioBufferListPointer(ablListPtr)
-
-        // ── 2. 直接从 ABL 取原始 PCM，混声为 mono Float32（类比 AudioDecoder 的 Int16→Float 转换）──
-        var monoSamples = [Float](repeating: 0, count: numFrames)
-
-        if isFloat && isNonI {
-            // 非交错 Float32（每个 AudioBuffer 对应一路声道）
-            var validCh = 0
-            for ab in ablWrapper {
-                guard let data = ab.mData else { continue }
-                let floats = data.assumingMemoryBound(to: Float.self)
-                for i in 0..<numFrames { monoSamples[i] += floats[i] }
-                validCh += 1
-            }
-            if validCh > 1 {
-                let inv = 1.0 / Float(validCh)
-                for i in 0..<numFrames { monoSamples[i] *= inv }
-            }
-        } else if isFloat && !isNonI {
-            // 交错 Float32：[L R L R ...]
-            guard let data = ablWrapper[0].mData else {
-                writeDiag("E4:mData_nil float_interleaved", forKey: kDiagAudioConv); return
-            }
-            let floats = data.assumingMemoryBound(to: Float.self)
-            let inv = srcCh > 1 ? 1.0 / Float(srcCh) : 1.0
-            for i in 0..<numFrames {
-                var sum: Float = 0
-                for ch in 0..<srcCh { sum += floats[i * srcCh + ch] }
-                monoSamples[i] = sum * inv
-            }
-        } else {
-            // Int16 交错（同 AudioDecoder：Float($0) / 32768.0），44100Hz 2ch 即此路径
-            guard let data = ablWrapper[0].mData else {
-                writeDiag("E5:mData_nil int16", forKey: kDiagAudioConv); return
-            }
-            let bitsPerCh = Int(asbd.mBitsPerChannel)
-            if bitsPerCh == 16 || bitsPerCh == 0 {
-                let int16s = data.assumingMemoryBound(to: Int16.self)
-                let inv = srcCh > 1 ? 1.0 / Float(srcCh) : 1.0
-                for i in 0..<numFrames {
-                    var sum: Float = 0
-                    for ch in 0..<srcCh { sum += Float(int16s[i * srcCh + ch]) / 32768.0 }
-                    monoSamples[i] = sum * inv
-                }
-            } else {
-                // Int32 交错
-                let int32s = data.assumingMemoryBound(to: Int32.self)
-                let inv = srcCh > 1 ? 1.0 / Float(srcCh) : 1.0
-                for i in 0..<numFrames {
-                    var sum: Float = 0
-                    for ch in 0..<srcCh { sum += Float(int32s[i * srcCh + ch]) / 2147483648.0 }
-                    monoSamples[i] = sum * inv
-                }
-            }
+        // ── 2. 取原始 PCM：Int16 保持交错 Int16（转成本机字节序），其他格式下混成单声道 Float ──
+        let buffers = UnsafeMutableAudioBufferListPointer(ablListPtr).map {
+            UnsafeRawBufferPointer(start: UnsafeRawPointer($0.mData), count: $0.mData == nil ? 0 : Int($0.mDataByteSize))
+        }
+        guard let pcm = ReplayKitPcm.convert(format: format, buffers: buffers, frames: numFrames) else {
+            writeDiag("E4:unsupported \(format.bitsPerChannel)bit float=\(format.isFloat) "
+                      + "nonI=\(format.isNonInterleaved) buffers=\(buffers.count)", forKey: kDiagAudioConv)
+            return
         }
 
-        // ── 3. 线性插值重采样到 16 kHz（同 AudioDecoder 的 resample() 函数）──
+        // ── 3. 流式重采样到 16 kHz：来源 / 格式变了、或时间不连续时重新起头 ──
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let ptsUs: Int64? = pts.isValid
+            ? CMTimeConvertScale(pts, timescale: 1_000_000, method: .roundTowardZero).value : nil
+        let key = "\(source) \(srcRate) \(pcm.channels)"
+        var restart = resampler == nil || key != resamplerKey
+        if !restart, let us = ptsUs, let r = resampler {
+            let expectUs = resamplerBaseUs + r.inputFrames * 1_000_000 / Int64(srcRate)
+            if abs(us - expectUs) > DISCONTINUITY_US { restart = true }
+        }
+        if restart {
+            resampler = PcmResampler(inputRate: srcRate, channelCount: pcm.channels)
+            resamplerKey = key
+            resamplerBaseUs = ptsUs ?? 0
+        }
         let output: [Float]
-        if srcRate != 16000 {
-            output = resampleLinear(monoSamples, fromRate: srcRate, toRate: 16000)
-        } else {
-            output = monoSamples
+        switch pcm {
+        case .int16(let samples, _): output = resampler!.process(samples, frames: numFrames)
+        case .mono(let samples):     output = resampler!.process(mono: samples)
         }
 
-        guard !output.isEmpty else {
-            writeDiag("E6:output_empty", forKey: kDiagAudioConv); return
-        }
-        writeDiag("OK \(srcRate)→16k len=\(output.count)", forKey: kDiagAudioConv)
+        guard !output.isEmpty else { return }   // 不足 16 个输出样本时先攒着，下一块一起出
+        writeDiag("OK \(source) \(srcRate)→16k len=\(output.count)", forKey: kDiagAudioConv)
         audioWriter?.write(output)
-    }
-
-    /// 线性插值重采样（与 AudioDecoder.swift 的 resample() 函数逻辑一致）
-    private func resampleLinear(_ input: [Float], fromRate: Int, toRate: Int) -> [Float] {
-        guard !input.isEmpty, fromRate > 0, toRate > 0 else { return [] }
-        let ratio       = Double(fromRate) / Double(toRate)
-        let outputCount = max(1, Int(Double(input.count) / ratio))
-        var output      = [Float](repeating: 0, count: outputCount)
-        for i in 0..<outputCount {
-            let srcPos = Double(i) * ratio
-            let idx    = Int(srcPos)
-            let frac   = Float(srcPos - Double(idx))
-            if idx + 1 < input.count {
-                output[i] = input[idx] * (1 - frac) + input[idx + 1] * frac
-            } else {
-                output[i] = idx < input.count ? input[idx] : 0
-            }
-        }
-        return output
     }
 
     // MARK: - 视频处理（降采样 → JPEG → 共享文件）

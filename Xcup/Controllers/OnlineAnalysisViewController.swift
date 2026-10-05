@@ -569,10 +569,16 @@ class OnlineAnalysisViewController: UIViewController {
 
     private func onNewAudioData() {
         guard let reader = audioReader else { return }
+        // 模型 / 响度用的数据：只取扩展上次之后新写入的样本，pcmBuffer 里是连续、不重复的音频流。
+        // （旧做法每次通知都读"最新 4800 个"：通知比 0.3 秒频繁时同一段音频被重复写入，稀疏时又会漏掉）
+        let fresh = reader.readNew()
+        if !fresh.isEmpty {
+            let nowMs   = Int64(Date().timeIntervalSince1970 * 1000)
+            let startMs = nowMs - Int64(fresh.count * 1000 / 16000)
+            pcmBuffer.write(fresh, startTimestampMs: startMs, sampleRate: 16000)
+        }
+        // 静音检测的输入保持原样（每次通知看最近 0.3 秒），阈值是按这个调的
         guard let samples = reader.readLatest(count: 4800), !samples.isEmpty else { return }
-        let nowMs   = Int64(Date().timeIntervalSince1970 * 1000)
-        let startMs = nowMs - Int64(samples.count * 1000 / 16000)
-        pcmBuffer.write(samples, startTimestampMs: startMs, sampleRate: 16000)
         handleSilenceDetection(samples: samples)
 
         // audioChunksReceived += 1

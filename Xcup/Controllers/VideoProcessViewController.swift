@@ -553,7 +553,8 @@ class VideoProcessViewController: UIViewController {
         audioDecoder = AudioDecoder(
             asset: asset,
             buffer: pcmBuffer,
-            positionProvider: { Int(player.currentTime().seconds * 1000) }
+            // 弱引用 player：解码线程不应让播放器在页面退出后继续存活
+            positionProvider: { [weak player] in Int((player?.currentTime().seconds ?? 0) * 1000) }
         )
 
         audioDecoder.startDecoding()
@@ -1557,6 +1558,7 @@ class VideoProcessViewController: UIViewController {
             }
 
             self.audioAnalysisQueue.async {
+                self.audioDecoder.stop()          // 先让旧解码线程退出，再清缓冲，避免旧位置的音频写进清空后的缓冲
                 self.pcmBuffer.reset()
                 self.audioDecoder.seekTo(Int(currentMs))
                 self.audioStartTime = currentMs
