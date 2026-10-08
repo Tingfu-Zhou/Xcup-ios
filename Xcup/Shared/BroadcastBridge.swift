@@ -42,7 +42,9 @@ enum AudioRing {
 final class AudioRingReader {
     private var fd: Int32 = -1
     private var base: UnsafeRawPointer?
+    private let readLock = NSLock()
     private var lastCursor: Int? = nil   // readNew() 上次读到的写游标
+    private var lastSeq: UInt32 = 0      // readNew() 上次看到的写序号（扩展重启后从 0 重新计）
 
     init?(groupID: String = kBroadcastAppGroupID) {
         guard let url = FileManager.default
@@ -65,16 +67,22 @@ final class AudioRingReader {
 
     /// 读出上次调用之后扩展新写入的全部样本（按写入顺序，连续、不重复、不遗漏）。
     /// 第一次调用只记下位置、不返回历史数据。两次调用之间写入超过整个环形缓冲（20 秒）时，只能拿到最近的部分。
+    /// 扩展重启过（AudioWriter 重新初始化，游标和序号都归零）时，只返回重启之后写入的部分，不会把上一次的旧数据当成新数据。
     func readNew() -> [Float] {
         guard let b = base else { return [] }
+        readLock.lock()
+        defer { readLock.unlock() }
         let writeCursor = Int(b.load(fromByteOffset: 0, as: UInt32.self))
+        let seq = b.load(fromByteOffset: 4, as: UInt32.self)
         let cap = AudioRing.capacity
-        defer { lastCursor = writeCursor }
-        guard let last = lastCursor, writeCursor != last, writeCursor < cap else { return [] }
-        let n = ((writeCursor - last) % cap + cap) % cap
+        defer { lastCursor = writeCursor; lastSeq = seq }
+        guard writeCursor < cap, let last = lastCursor else { return [] }
+        let start = seq < lastSeq ? 0 : last          // 序号回退 = 扩展重启：重启后写入的就是 [0, writeCursor)
+        let n = ((writeCursor - start) % cap + cap) % cap
+        guard n > 0 else { return [] }
         let data = b.advanced(by: AudioRing.headerBytes).assumingMemoryBound(to: Float.self)
         var out = [Float](repeating: 0, count: n)
-        for i in 0..<n { out[i] = data[(last + i) % cap] }
+        for i in 0..<n { out[i] = data[(start + i) % cap] }
         return out
     }
 

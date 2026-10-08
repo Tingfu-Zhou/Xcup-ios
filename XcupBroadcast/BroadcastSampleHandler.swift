@@ -8,6 +8,7 @@
 
 import ReplayKit
 import AVFoundation
+import CoreMedia
 import AudioToolbox
 import UIKit
 import Foundation
@@ -158,6 +159,9 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
     private var lastAppAudioUptime: TimeInterval = -.infinity
     private let MIC_FALLBACK_SEC: TimeInterval = 1.0
 
+    // ReplayKit 可能在不同线程回调 App 音频和麦克风：下面这些音频状态和环形缓冲写端统一在 audioLock 里串行处理
+    private let audioLock = NSLock()
+
     // 流式重采样（与离线模式同一个 PcmResampler）：同一来源、同一格式、时间连续时跨块沿用，不丢样本、不重置相位
     private var resampler: PcmResampler?
     private var resamplerKey = ""
@@ -168,11 +172,13 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
     // MARK: - 广播生命周期
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        audioLock.lock()
         audioWriter = AudioWriter()
         audioRawDiagSent = false
         lastAppAudioUptime = -.infinity
         resampler = nil
         resamplerKey = ""
+        audioLock.unlock()
         if audioWriter == nil {
             print("[XcupBroadcast] ⚠️ AudioWriter 初始化失败，请检查 App Groups 配置")
         }
@@ -196,6 +202,7 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
         switch type {
         case .audioApp:
             // App 音频（播放的声音，与 Android AudioPlaybackCapture 等价）：优先使用
+            audioLock.lock(); defer { audioLock.unlock() }
             lastAppAudioUptime = ProcessInfo.processInfo.systemUptime
             if !audioRawDiagSent {
                 audioRawDiagSent = true
@@ -205,6 +212,7 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
             processAudio(sampleBuffer, source: "app")
         case .audioMic:
             // 麦克风：只在一段时间没有 App 音频时兜底，避免两路叠加
+            audioLock.lock(); defer { audioLock.unlock() }
             guard ProcessInfo.processInfo.systemUptime - lastAppAudioUptime > MIC_FALLBACK_SEC else { return }
             if !audioRawDiagSent {
                 audioRawDiagSent = true
