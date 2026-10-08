@@ -14,14 +14,12 @@ import TensorFlowLite
 // MARK: - 线程安全的分析结果存储
 class ThreadSafeAnalysisResults {
     private let queue = DispatchQueue(label: "com.xcup.analysisResults", attributes: .concurrent)
-    
-    private var _videoAction: String = ""
-    private var _videoConfidence: Float = 0.0
-    private var _audioAction: String = ""
-    private var _audioConfidence: Float = 0.0
-    private var _videoTimestamp: TimeInterval = 0  // 🆕 视频结果时间戳
-    private var _audioTimestamp: TimeInterval = 0  // 🆕 音频结果时间戳
-    
+
+    // 视频 / 音频的判定结果：动作 + 置信度 + 产出时刻打包成一个不可变对象，整体发布、整体读出
+    // （融合仲裁按产出时刻去重，三者必须来自同一次推理）。nil = 还没有结果
+    private var _videoResult: FusionArbiter.Result?
+    private var _audioResult: FusionArbiter.Result?
+
     // ===== 🆕 新增：音频节奏器结果 =====
     /*
     private var _audioRhythmHz: Float = .nan        // 音频节奏频率(Hz)
@@ -54,30 +52,14 @@ class ThreadSafeAnalysisResults {
     private var _videoFreqConf: Float = 0.0         // 视频节奏置信度
     private var _videoFreqTsMs: Int64 = 0           // 视频节奏时间戳(毫秒)
     
-    var videoResult: (action: String, confidence: Float, timestamp: TimeInterval) {
-        get {
-            queue.sync { (_videoAction, _videoConfidence, _videoTimestamp) }
-        }
-        set {
-            queue.async(flags: .barrier) {
-                self._videoAction = newValue.action
-                self._videoConfidence = newValue.confidence
-                self._videoTimestamp = newValue.timestamp
-            }
-        }
+    var videoResult: FusionArbiter.Result? {
+        get { queue.sync { _videoResult } }
+        set { queue.async(flags: .barrier) { self._videoResult = newValue } }
     }
-    
-    var audioResult: (action: String, confidence: Float, timestamp: TimeInterval) {
-        get {
-            queue.sync { (_audioAction, _audioConfidence, _audioTimestamp) }
-        }
-        set {
-            queue.async(flags: .barrier) {
-                self._audioAction = newValue.action
-                self._audioConfidence = newValue.confidence
-                self._audioTimestamp = newValue.timestamp
-            }
-        }
+
+    var audioResult: FusionArbiter.Result? {
+        get { queue.sync { _audioResult } }
+        set { queue.async(flags: .barrier) { self._audioResult = newValue } }
     }
     
     /*
@@ -137,15 +119,6 @@ class ThreadSafeAnalysisResults {
             self._videoFreqTsMs = 0
         }
     }
-}
-
-// 🆕 MARK: - 动作记录结构体
-struct ActionRecord {
-    let videoAction: String
-    let audioAction: String
-    let videoConfidence: Float
-    let audioConfidence: Float
-    let timestamp: TimeInterval
 }
 
 class VideoProcessViewController: UIViewController {
@@ -233,28 +206,12 @@ class VideoProcessViewController: UIViewController {
     var framesSinceLastMulti = 0      // 多分类帧计数器
     */
     
-    // MARK: - 平滑融合相关
-    private var actionHistory = [ActionRecord]()  // 动作历史记录
-    private let historyLock = NSLock()           // 历史记录锁
-    private let SMOOTH_WINDOW_SIZE = 6           // 窗口大小（6 条 × 500ms ≈ 3 秒）
-    private let SMOOTH_MIN_COUNT = 3             // 投票最少出现次数
+    // MARK: - 融合仲裁
+    // 启动 / 维持 / 停止分开判断（规则见 FusionArbiter）。2026-10-07 起替代原来的平滑投票 smoothedFusion、
+    // 一致性快通道和启动仲裁 applyDoStartGate（都已删除）。只在融合线程（主线程）访问；seek / 恢复分析时 reset。
+    private let fusionArbiter = FusionArbiter()
     private var latestBluetoothAction = ""       // 最新的蓝牙发送动作
 
-    // MARK: - 一致性快通道（音视频同 tick 高置信度一致时绕过窗口投票）
-    private let FUSION_FASTPATH_VIDEO_CONF: Float = 0.70
-    private let FUSION_FASTPATH_AUDIO_CONF: Float = 0.70
-
-    // MARK: - 启动仲裁（applyDoStartGate）
-    // 设计前提：实测音频模型准确度高于视频模型，视频不拥有启动否决权，
-    // 只能在强冲突时把启动短暂推迟，且推迟有硬上限（绝不永久阻塞）。
-    private let VIDEO_PLOT_CONFLICT_CONF: Float = 0.80   // 构成「强冲突」所需的视频剧情置信度
-    private let FUSION_CONFLICT_MARGIN: Float = 0.15     // 视频需领先音频的置信度差
-    private let CONFLICT_MAX_HOLD_TICKS = 4              // 冲突延迟上限，超过后强制放行
-    private let AUDIO_STRONG_START_CONF: Float = 0.75    // 强音频直通启动门槛
-    private let AUDIO_ONLY_START_TICKS = 2               // 弱证据启动所需连续 tick 数
-    private var audioOnlyDoStreak = 0                    // 弱证据 do 连续计数（仅融合线程访问）
-    private var conflictHoldTicks = 0                    // 强冲突连续计数（仅融合线程访问）
-    
     // MARK: - 蓝牙状态管理相关
     private var pendingBluetoothState = ""           // 待确认的蓝牙状态
     private var currentBluetoothState = ""           // 当前执行的蓝牙状态
@@ -759,8 +716,10 @@ class VideoProcessViewController: UIViewController {
                      probs.count > 1 ? probs[1] : 0,
                      probs.count > 2 ? probs[2] : 0))
 
-        // 8. 写入线程安全结果（unclear 也写入，让融合层去消化空字符串）
-        self.analysisResults.videoResult = (action, confidence, Date().timeIntervalSince1970 * 1000)
+        // 8. 动作 + 置信度 + 产出时刻打包成一个对象整体发布（unclear 也发布：融合仲裁按产出时刻去重、计数）。
+        //    推理和发布都在 videoAnalysisQueue 上，seek 清帧窗也在这条串行队列上，两者不会交错
+        self.analysisResults.videoResult = FusionArbiter.Result(action: action, conf: confidence,
+                                                                tsMs: FusionArbiter.nowMs())
     }
 
 
@@ -814,8 +773,10 @@ class VideoProcessViewController: UIViewController {
                 }
             }
 
-            // 线程安全地存储结果（unclear 也写入：交由融合层做投票消化）
-            self.analysisResults.audioResult = (action, outConf, Date().timeIntervalSince1970 * 1000)
+            // 动作 + 置信度 + 产出时刻打包成一个对象整体发布（unclear 也发布：融合仲裁按产出时刻去重、计数）。
+            // 推理和发布都在 audioAnalysisQueue 上，seek 清 PCM 也在这条串行队列上，两者不会交错
+            self.analysisResults.audioResult = FusionArbiter.Result(action: action, conf: outConf,
+                                                                    tsMs: FusionArbiter.nowMs())
 
             print(String(format: "✅ 🎵 [音频线程] 音频类型 = %@, 原始idx=%d, 原始p=%.3f",
                          action.isEmpty ? "(unclear)" : action, index, confidence))
@@ -879,6 +840,7 @@ class VideoProcessViewController: UIViewController {
     func performFusion() {
         guard !isAnalysisPaused else { return }
 
+        // 每一路只读一个结果对象：动作、置信度、产出时刻保证来自同一次推理
         let videoResult = analysisResults.videoResult
         let audioResult = analysisResults.audioResult
         // let audioRhythm = analysisResults.audioRhythm
@@ -886,20 +848,20 @@ class VideoProcessViewController: UIViewController {
         // 视频节律已移除，不再读取 videoFreq
         // let videoFreq = analysisResults.videoFreq
 
-        // 🆕 计算结果的新鲜度（毫秒）
-        let currentTime = Date().timeIntervalSince1970 * 1000
-        let videoAge = videoResult.timestamp > 0 ? currentTime - videoResult.timestamp : Double.greatestFiniteMagnitude
-        let audioAge = audioResult.timestamp > 0 ? currentTime - audioResult.timestamp : Double.greatestFiniteMagnitude
+        // 🆕 计算结果的新鲜度（毫秒）。先读结果再取 now，保证结果的产出时刻 <= now
+        let now = FusionArbiter.nowMs()
+        let videoTs = videoResult?.tsMs ?? 0
+        let audioTs = audioResult?.tsMs ?? 0
         // let audiofreqAge = audioRhythm.tsMs > 0 ? currentTime - Double(audioRhythm.tsMs) : Double.greatestFiniteMagnitude
-        let loudAge = loud.tsMs > 0 ? currentTime - Double(loud.tsMs) : Double.greatestFiniteMagnitude
+        let loudAge: Int64 = loud.tsMs > 0 ? now - loud.tsMs : Int64.max
 
         // 🆕 过滤超过2秒的过期数据
-        let MAX_AGE: Double = 2000 // 2秒
+        let MAX_AGE: Int64 = 2000 // 2秒
 
-        var filteredVideoAction = videoResult.action
-        var filteredVideoConfidence = videoResult.confidence
-        var filteredAudioAction = audioResult.action
-        var filteredAudioConfidence = audioResult.confidence
+        var filteredVideoAction = videoResult?.action ?? ""
+        var filteredVideoConfidence: Float = videoResult?.conf ?? 0
+        var filteredAudioAction = audioResult?.action ?? ""
+        var filteredAudioConfidence: Float = audioResult?.conf ?? 0
 
         // var audioFreq = audioRhythm.hz
         // var audioFreqConf = audioRhythm.conf
@@ -918,18 +880,16 @@ class VideoProcessViewController: UIViewController {
             audioLevelConf = 0.0
         }
 
-        // 如果视频结果过期，清空它
-        if videoAge > MAX_AGE {
+        // 如果视频结果过期（或还没有结果），清空它
+        if videoTs <= 0 || now - videoTs > MAX_AGE {
             filteredVideoAction = ""
             filteredVideoConfidence = 0
-            //print(String(format: "[融合] 视频结果过期（%.0fms），已忽略", videoAge))
         }
 
-        // 如果音频结果过期，清空它
-        if audioAge > MAX_AGE {
+        // 如果音频结果过期（或还没有结果），清空它
+        if audioTs <= 0 || now - audioTs > MAX_AGE {
             filteredAudioAction = ""
             filteredAudioConfidence = 0
-            //print(String(format: "[融合] 音频结果过期（%.0fms），已忽略", audioAge))
         }
 
         // 视频/音频统一词表已经是 {"do", "Noise", ""}，不再需要 oral→do 映射
@@ -951,27 +911,19 @@ class VideoProcessViewController: UIViewController {
             tvAudioAction.text = String(format: "A: %@ (p=%.2f)", filteredAudioAction, filteredAudioConfidence)
         }
             
-        // 🆕 使用平滑融合逻辑
-        var finalAction = smoothedFusion(
-            videoAction: filteredVideoAction,
-            audioAction: filteredAudioAction,
-            videoConf: filteredVideoConfidence,
-            audioConf: filteredAudioConfidence
+        // 🆕 融合仲裁：启动 / 维持 / 停止分开判断，证据按"新推理结果"计数（按产出时刻去重）。
+        // 过期结果的产出时刻照样传进去，账本自己去重 / 丢弃；motorOn 必须在 updateBluetoothState 之前取
+        let finalAction = fusionArbiter.decide(
+            now: now,
+            vAction: filteredVideoAction, vConf: filteredVideoConfidence, vTs: videoTs > 0 ? videoTs : -1,
+            aAction: filteredAudioAction, aConf: filteredAudioConfidence, aTs: audioTs > 0 ? audioTs : -1,
+            motorOn: isSexAction(currentBluetoothState)
         )
+        print("[融合仲裁] \(fusionArbiter.lastReason) -> \(finalAction.isEmpty ? "(不驱动)" : finalAction)")
 
-        // 🆕 启动仲裁：仅约束「非 do 状态 → 启动 do」；维持阶段音频可单独维持
-        finalAction = applyDoStartGate(
-            finalAction: finalAction,
-            videoAction: filteredVideoAction,
-            videoConf: filteredVideoConfidence,
-            audioAction: filteredAudioAction,
-            audioConf: filteredAudioConfidence
-        )
-
-        // 🆕 使用稳定的蓝牙发送策略
+        // 🆕 使用稳定的蓝牙发送策略（"" = 本 tick 不驱动蓝牙状态机）
         if !finalAction.isEmpty {
             updateBluetoothState(finalAction, finalfreq)
-            //print(String(format: "[融合] finalAction: %@ (V:%.0fms前, A:%.0fms前)", finalAction, videoAge, audioAge))
         }
             
         // 🆕 更新UI, 显示蓝牙实际发送的动作
@@ -1073,208 +1025,6 @@ class VideoProcessViewController: UIViewController {
         // candidateLevel == curLevel：无需处理
 
         return finalFreq
-    }
-
-        
-    // 🆕 MARK: - 时间窗口平滑融合方法
-    private func smoothedFusion(videoAction: String, audioAction: String, videoConf: Float, audioConf: Float) -> String {
-        historyLock.lock()
-        defer { historyLock.unlock() }
-            
-        // 添加当前记录到历史
-        let record = ActionRecord(
-            videoAction: videoAction,
-            audioAction: audioAction,
-            videoConfidence: videoConf,
-            audioConfidence: audioConf,
-            timestamp: Date().timeIntervalSince1970
-        )
-        actionHistory.append(record)
-
-        // 保持窗口大小
-        while actionHistory.count > SMOOTH_WINDOW_SIZE {
-            actionHistory.removeFirst()
-        }
-
-        // 🆕 一致性快通道：两个模态同 tick 高置信度一致时没有抖动嫌疑，不必攒票。
-        // 注意：本 tick 的记录已先入窗（见上），保证窗口不漏账。
-        // 对 "do" 与 "Noise" 都生效；停转方向的安全性仍由蓝牙状态机兜底。
-        if !videoAction.isEmpty
-            && videoAction == audioAction
-            && videoConf >= FUSION_FASTPATH_VIDEO_CONF
-            && audioConf >= FUSION_FASTPATH_AUDIO_CONF {
-            print(String(format: "[快通道] 音视频一致 %@ (v=%.2f a=%.2f)，绕过窗口投票",
-                         videoAction, videoConf, audioConf))
-            return videoAction
-        }
-
-        // 如果历史记录太少，使用原始逻辑
-        if actionHistory.count < 3 {
-            return selectBestAction(
-                videoAction: videoAction,
-                audioAction: audioAction,
-                videoConf: videoConf,
-                audioConf: audioConf
-            )
-        }
-            
-        // 统计各动作的加权得分
-        var actionScores = [String: Float]()
-        var actionCounts = [String: Int]()
-            
-        // 给最近的记录更高的权重
-        for (index, record) in actionHistory.enumerated() {
-            let weight = Float(index + 1) / Float(actionHistory.count) // 时间权重，越新权重越高
-                
-            // 处理视频动作
-            if !record.videoAction.isEmpty && record.videoAction != "Background" {
-                // 包括Noise在内的所有动作都参与评分
-                let videoKey = record.videoAction
-                var score = actionScores[videoKey] ?? 0
-                score += record.videoConfidence * weight * 0.8 // 视频权重稍低
-                actionScores[videoKey] = score
-                    
-                let count = actionCounts[videoKey] ?? 0
-                actionCounts[videoKey] = count + 1
-            }
-                
-            // 处理音频动作
-            if !record.audioAction.isEmpty {
-                // 包括Noise在内的所有动作都参与评分
-                let audioKey = record.audioAction
-                var score = actionScores[audioKey] ?? 0
-                score += record.audioConfidence * weight * 1.2 // 音频权重更高
-                actionScores[audioKey] = score
-                    
-                let count = actionCounts[audioKey] ?? 0
-                actionCounts[audioKey] = count + 1
-            }
-        }
-            
-        // 选择得分最高的动作
-        var bestAction = ""
-        var bestScore: Float = 0
-            
-        for (action, score) in actionScores {
-            let count = actionCounts[action] ?? 0
-
-            // 需要至少出现 SMOOTH_MIN_COUNT 次才考虑（避免偶然噪声）
-            if count >= SMOOTH_MIN_COUNT && score > bestScore {
-                bestScore = score
-                bestAction = action
-            }
-        }
-            
-        // 如果没有找到合适的动作，使用最新的高置信度结果
-        if bestAction.isEmpty {
-            if let latest = actionHistory.last {
-                bestAction = selectBestAction(
-                    videoAction: latest.videoAction,
-                    audioAction: latest.audioAction,
-                    videoConf: latest.videoConfidence,
-                    audioConf: latest.audioConfidence
-                )
-            }
-        }
-            
-        // 记录平滑结果
-        //print(String(format: "[平滑融合] 窗口大小:%d, 选择动作:%@ (得分:%.2f)",actionHistory.count, bestAction, bestScore))
-            
-        return bestAction
-    }
-        
-    // 🆕 简单的动作选择逻辑（用于历史记录不足时）
-    private func selectBestAction(videoAction: String, audioAction: String, videoConf: Float, audioConf: Float) -> String {
-        // 使用置信度来决定，而不是排除Noise
-        // 音频优先策略
-        if !audioAction.isEmpty {
-            // 如果音频是有效动作（非Noise）或音频置信度很高，使用音频
-            if audioAction != "Noise" || audioConf > 0.7 {
-                return audioAction
-            }
-        }
-        // 视频作为备选
-        if !videoAction.isEmpty && videoAction != "Background" {
-            // 如果视频是有效动作（非Noise）或视频置信度很高，使用视频
-            if videoAction != "Noise" || videoConf > 0.7 {
-                return videoAction
-            }
-        }
-        // 如果音视频都是Noise，返回Noise（而不是空字符串）
-        if audioAction == "Noise" || videoAction == "Noise" {
-            return "Noise"
-        }
-
-        return ""
-    }
-
-    // 🆕 MARK: - 启动仲裁：applyDoStartGate
-    // 作用范围仅限「从非 do 状态启动 do」；已在 do 状态时（维持阶段）音频可单独维持，不受任何限制。
-    // 设计前提：实测音频模型准确度高于视频模型 —— 视频不拥有否决权，
-    // 只能在与音频强烈冲突时把启动短暂推迟，且推迟有硬上限（最坏 4+2=6 tick ≈ 3 秒后必然放行）。
-    // 返回 "" 表示本 tick 不驱动蓝牙状态机（融合循环对空结果直接跳过发送），维持现状，不主动发 Noise。
-    // 两个计数器只在融合线程（主线程）读写，无需加锁；窗口证据检索需持有 historyLock。
-    private func applyDoStartGate(finalAction: String,
-                                  videoAction: String, videoConf: Float,
-                                  audioAction: String, audioConf: Float) -> String {
-        if finalAction != "do" {
-            audioOnlyDoStreak = 0
-            conflictHoldTicks = 0
-            return finalAction
-        }
-        // 「当前蓝牙状态已是 do」读的是状态机已确认执行中的动作，不是融合输出
-        if currentBluetoothState == "do" {
-            audioOnlyDoStreak = 0
-            conflictHoldTicks = 0
-            return finalAction
-        }
-
-        // —— 以下为启动阶段 ——
-        let audioDoConf: Float = (audioAction == "do") ? audioConf : 0
-
-        // 规则1 强冲突延迟（有上限，绝不永久阻塞）
-        let strongConflict = videoAction == "Noise"
-            && videoConf >= VIDEO_PLOT_CONFLICT_CONF
-            && (videoConf - audioDoConf) >= FUSION_CONFLICT_MARGIN
-        if strongConflict {
-            conflictHoldTicks += 1
-            if conflictHoldTicks <= CONFLICT_MAX_HOLD_TICKS {
-                print(String(format: "[启动仲裁] 强冲突：视频剧情 %.2f vs 音频 do %.2f，延迟启动 (%d/%d)",
-                             videoConf, audioDoConf, conflictHoldTicks, CONFLICT_MAX_HOLD_TICKS))
-                return ""   // 本 tick 不启动
-            }
-            // 超过上限 → 视频可能在系统性误判，按「音频更可信」继续往下走规则 2–4
-            print("[启动仲裁] 强冲突超过上限，视频可能在系统性误判，按音频证据继续")
-        } else {
-            conflictHoldTicks = 0
-        }
-
-        // 规则2 强音频直通
-        if audioDoConf >= AUDIO_STRONG_START_CONF {
-            audioOnlyDoStreak = 0
-            print(String(format: "[启动仲裁] 音频 do 置信度 %.2f 达直通门槛 %.2f，放行",
-                         audioDoConf, AUDIO_STRONG_START_CONF))
-            return finalAction
-        }
-
-        // 规则3 视频证据放行（平滑窗口内存在任一条 videoAction == "do"）
-        historyLock.lock()
-        let hasVideoDoEvidence = actionHistory.contains { $0.videoAction == "do" }
-        historyLock.unlock()
-        if hasVideoDoEvidence {
-            audioOnlyDoStreak = 0
-            print("[启动仲裁] 平滑窗口内存在视频 do 证据，放行")
-            return finalAction
-        }
-
-        // 规则4 弱证据兜底
-        audioOnlyDoStreak += 1
-        if audioOnlyDoStreak >= AUDIO_ONLY_START_TICKS {
-            print(String(format: "[启动仲裁] 弱证据连续 %d tick，兜底放行", audioOnlyDoStreak))
-            return finalAction
-        }
-        print(String(format: "[启动仲裁] 弱证据 %d/%d tick，暂不启动", audioOnlyDoStreak, AUDIO_ONLY_START_TICKS))
-        return ""
     }
 
 
@@ -1530,8 +1280,12 @@ class VideoProcessViewController: UIViewController {
             guard let self = self else { return }
             
             print("✅ 执行用户拖动后的 seek 处理逻辑，时间点: \(currentMs)ms")
-            
-            // 在后台线程中清理数据
+
+            // 1) 在分析队列里清帧窗 / PCM。两条分析队列都是串行队列，推理 + 发布结果也在上面执行
+            //    （相当于 Android 的 videoLock / audioLock）：seek 之前开始的推理一定在清空之前发布完
+            let buffersCleared = DispatchGroup()
+
+            buffersCleared.enter()
             self.videoAnalysisQueue.async {
                 // 🆕 清空视频分类滑动窗口
                 self.frameBuffer.removeAll()
@@ -1544,19 +1298,10 @@ class VideoProcessViewController: UIViewController {
 
                 // 视频节律已移除：
                 // self.videoRhythmEstimator.reset()
-
-                // 🆕 清空动作历史
-                self.historyLock.lock()
-                self.actionHistory.removeAll()
-                self.historyLock.unlock()
-
-                // 重置蓝牙状态
-                self.pendingBluetoothState = ""
-                self.currentBluetoothState = ""
-                self.pendingStateStartTime = 0
-                self.currentStateStartTime = 0
+                buffersCleared.leave()
             }
 
+            buffersCleared.enter()
             self.audioAnalysisQueue.async {
                 self.audioDecoder.stop()          // 先让旧解码线程退出，再清缓冲，避免旧位置的音频写进清空后的缓冲
                 self.pcmBuffer.reset()
@@ -1565,34 +1310,47 @@ class VideoProcessViewController: UIViewController {
                 // 🆕 重置音频节奏器
                 // self.audioRhythmEstimator.reset()
                 self.audioLoudnessEstimator.reset()
+                buffersCleared.leave()
             }
-            // 🆕 重置分析结果中的节奏数据（视频和音频）
-            self.analysisResults.resetRhythm()
-            
+
             self.lastFinalAction = ""
 
-            // 🆕 重置启动仲裁计数器（与清空动作历史同步；work item 在主线程执行）
-            self.audioOnlyDoStreak = 0
-            self.conflictHoldTicks = 0
+            // 2)~4) 两路缓冲都清完后回到主线程（融合线程），顺序与 Android handleSeekComplete 一致
+            buffersCleared.notify(queue: .main) { [weak self] in
+                guard let self = self else { return }
 
-            // 在 handleUserSeek(...) 的后台线程清理块中追加：
-            // 重置档位确认状态
-            self.currentLevel = 1
-            self.currentLevelSinceMs = 0
-            self.pendingLevel = nil
-            self.pendingLevelSinceMs = 0
-            self.lastSentLevel = 0
+                // 2) 清空融合仲裁的证据：seek 之前产出的结果一律不算。放在清完缓冲之后，
+                //    seek 前开始的推理此时已经发布、产出时刻早于 reset，会被当成旧结果丢掉
+                self.fusionArbiter.reset(FusionArbiter.nowMs())
 
-            // ★ 新增：清空挂起状态
-            self.suspendedBluetoothState = ""
-            self.suspendedLevel = 0
-            
-            // 播放过完片尾后，如果用户 seek 了，撤销“已播完”标记
-            if self.isVideoCompleted {
-                self.isVideoCompleted = false
-                // 只有播放器处于播放状态时才恢复分析
-                if self.player.rate != 0 {
-                    self.resumeAnalysis()
+                // 🆕 重置分析结果中的节奏数据（视频和音频）
+                self.analysisResults.resetRhythm()
+
+                // 3) 重置蓝牙状态（原来在视频队列里改，和主线程的 updateBluetoothState 有竞争，挪到主线程）
+                self.pendingBluetoothState = ""
+                self.currentBluetoothState = ""
+                self.pendingStateStartTime = 0
+                self.currentStateStartTime = 0
+
+                // 重置档位确认状态
+                self.currentLevel = 1
+                self.currentLevelSinceMs = 0
+                self.pendingLevel = nil
+                self.pendingLevelSinceMs = 0
+                self.lastSentLevel = 0
+
+                // ★ 新增：清空挂起状态
+                self.suspendedBluetoothState = ""
+                self.suspendedLevel = 0
+
+                // 4) 播放过完片尾后，如果用户 seek 了，撤销“已播完”标记。放在清空蓝牙状态 / 挂起动作之后：
+                //    否则 resumeAnalysis 会先把播完前挂起的旧动作发出去，紧接着状态又被清空，app 和设备就对不上了
+                if self.isVideoCompleted {
+                    self.isVideoCompleted = false
+                    // 只有播放器处于播放状态时才恢复分析
+                    if self.player.rate != 0 {
+                        self.resumeAnalysis()
+                    }
                 }
             }
         }
@@ -1627,9 +1385,21 @@ class VideoProcessViewController: UIViewController {
 
         // ★ 新增：挂起当前蓝牙动作并发送停止信号
         if !currentBluetoothState.isEmpty && currentBluetoothState != "Noise" {
-            suspendedBluetoothState = currentBluetoothState
-            suspendedLevel = currentLevel
-            print("[暂停] 挂起动作: \(suspendedBluetoothState), 档位: \(suspendedLevel)")
+            if fusionArbiter.lastDoHadEvidence {
+                suspendedBluetoothState = currentBluetoothState
+                suspendedLevel = currentLevel
+                print("[暂停] 挂起动作: \(suspendedBluetoothState), 档位: \(suspendedLevel)")
+            } else {
+                // 🆕 [融合仲裁] 马达此刻只是仲裁器在"等结果"（刚 seek / 恢复后的冷启动，或看不清听不清），
+                // 没有证据撑着：不带过暂停，状态同步成 Noise（下面照常发 Noise），恢复后从头判断
+                let now = Date().timeIntervalSince1970 * 1000
+                currentBluetoothState = "Noise"
+                currentStateStartTime = now
+                pendingBluetoothState = "Noise"
+                pendingStateStartTime = now
+                latestBluetoothAction = "Noise"
+                print("[暂停] 马达没有证据撑着（\(fusionArbiter.lastReason)），不挂起，恢复后重新判断")
+            }
         }
         if BluetoothManager.shared.isConnected && !BluetoothManager.shared.isPausedByLocal {
             BluetoothManager.shared.sendAction("Noise", 0)
@@ -1641,6 +1411,10 @@ class VideoProcessViewController: UIViewController {
 
     func resumeAnalysis() {
         isAnalysisPaused = false
+        // 🆕 [融合仲裁] 暂停前的证据已经过时，清空重来。恢复后马达若仍在转，仲裁会先等两路攒够新结果
+        // （wait_sparse，最多 6 秒），不会因为某一路刚出的一个"不转"就停。
+        // iOS 没有网页视频模式（VAD 静音暂停），离线模式的恢复都不需要静音预热
+        fusionArbiter.reset(FusionArbiter.nowMs())
 
         // ★ 新增：恢复挂起的蓝牙动作
         if !suspendedBluetoothState.isEmpty {
@@ -1666,6 +1440,11 @@ class VideoProcessViewController: UIViewController {
 
     // MARK: - 视频结束处理
     @objc func videoDidEnd() {
+        // 这个通知不保证在主线程投递；暂停要读融合仲裁、改蓝牙状态（都只在主线程访问），先切回主线程
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.videoDidEnd() }
+            return
+        }
         isVideoCompleted = true
         pauseAnalysis()
 

@@ -2,7 +2,7 @@
 
 一个运行在 iOS 端的实时视频理解与 BLE 联动项目。
 
-Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在设备端识别动作状态和节律强度，经过时间窗口平滑与状态管理后，将控制指令发送给兼容的 BLE 硬件。
+Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在设备端识别动作状态和节律强度，经过融合仲裁与状态管理后，将控制指令发送给兼容的 BLE 硬件。
 
 本项目由 [Xcup Android](https://github.com/Tingfu-Zhou/xcup-android) 移植而来，保留了 Android 版的端侧推理、多模态融合、播放同步和 BLE 控制逻辑，并使用 AVFoundation、CoreBluetooth、Swift 与 GCD 等 Apple 平台技术重新实现。
 
@@ -15,7 +15,7 @@ Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在�
 - 端侧视觉推理：使用 MobileNetV3Small TFLite 模型识别剧情、口部动作和性交动作三类画面。
 - 端侧音频推理：使用 YAMNet 与自定义分类器识别动作类别。
 - 节律强度估计：根据 PCM 音频生成离散强度档位，并与动作状态一同发送给硬件。
-- 多模态融合：对近期音频与视频结果进行加权、过滤和时间窗口平滑，降低单次误判与状态抖动。
+- 多模态融合（融合仲裁）：把马达的启动、维持、停止分开判断，证据按新推理结果计数；启动要两路佐证或持续的音频证据，维持只要任一路有支持，降低单模态误判造成的误转和动作中误停。
 - BLE 控制：使用 CoreBluetooth 实现自动扫描、连接、协议帧构建、CRC 校验、状态解析和指令发送。
 - 手动电子菜单：在 App 内直接选择变频模式（1-3）与马达强度（0-10 档），无需在设备上轮询实体按键。
 - 本地按键优先：硬件按键可暂停 App 控制，用户可在主界面手动恢复。
@@ -44,10 +44,10 @@ flowchart TB
     B --> C["视觉分类<br/>MobileNetV3Small"]
     B --> D["音频分类<br/>YAMNet + 自定义分类器"]
     B --> E["节律估计<br/>PCM → 档位"]
-    C --> F["时间窗口融合"]
+    C --> F["融合仲裁"]
     D --> F
-    E --> F
     F --> G["BLE 状态管理"]
+    E --> G
     G --> H["兼容硬件"]
 ```
 
@@ -55,7 +55,7 @@ flowchart TB
 
 1. 视频链路按播放时间提取帧，维护 12 帧时序窗口，并周期性执行 MobileNetV3Small 推理。
 2. 音频链路把音频统一处理为 16 kHz PCM，从环形缓冲区读取最近约 2 秒、共 32,000 个采样点的数据并执行 YAMNet 推理，同时估计节律强度。
-3. 融合链路周期性读取最新结果，过滤过期数据，通过加权时间窗口生成最终动作与档位，再交给 BLE 状态管理器发送。
+3. 融合链路每 500ms 读取最新结果，过滤过期数据，由融合仲裁 `FusionArbiter` 决定本 tick 的动作（启动、维持、停止分开判断），连同音频响度档位交给 BLE 状态管理器发送。
 
 视频和音频推理运行在独立后台队列中；UI 更新、融合结果消费和用户交互由主线程协调。共享结果通过线程安全容器、`DispatchQueue` barrier 等机制管理，避免 PCM 缓冲与分析状态发生并发读写冲突。
 
@@ -69,6 +69,7 @@ flowchart TB
 | SurfaceTexture + OpenGL/EGL | AVAssetImageGenerator + CoreImage |
 | Handler / Runnable | DispatchQueue、DispatchSourceTimer、CADisplayLink |
 | `PcmCircularBuffer.java` | `PcmCircularBuffer.swift` |
+| `FusionArbiter.java` | `FusionArbiter.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐 tick 校验） |
 | `AudioInferenceHelper.java` | `AudioInferenceHelper.swift` |
 | Android BLE API | `BluetoothManager.swift` + CoreBluetooth |
 | `synchronized` / 原子变量 | DispatchQueue barrier、同步读取和线程安全结果容器 |
@@ -84,6 +85,7 @@ flowchart TB
 | `PcmCircularBuffer.swift` | 管理 PCM 环形缓冲、时间窗口读取和并发访问 |
 | `AudioInferenceHelper.swift` | YAMNet 特征提取与自定义音频分类器推理 |
 | `ThreadSafeAnalysisResults.swift` | 在线程之间安全保存和读取分析结果 |
+| `FusionArbiter.swift` | 融合仲裁：根据两路的新推理结果决定马达的启动、维持与停止，离线模式与在线模式共用 |
 | `ManualControlView.swift` | 手动电子菜单：模式选择、强度滑杆、紧急停止与下发节流 |
 | `BluetoothManager.swift` | BLE 扫描、连接、协议帧编解码、CRC 校验和状态管理 |
 

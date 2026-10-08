@@ -106,27 +106,11 @@ class OnlineAnalysisViewController: UIViewController {
     private var framesSinceLastMulti = 0
     */
 
-    // MARK: - 平滑融合
-    private var actionHistory: [ActionRecord] = []
-    private let historyLock  = NSLock()
-    private let SMOOTH_WINDOW_SIZE = 6           // 6 条 × 500ms ≈ 3 秒
-    private let SMOOTH_MIN_COUNT = 3             // 投票最少出现次数
+    // MARK: - 融合仲裁（与 VideoProcessViewController 共用 FusionArbiter 的规则）
+    // 启动 / 维持 / 停止分开判断。2026-10-07 起替代原来的平滑投票 smoothedFusion、一致性快通道和
+    // 启动仲裁 applyDoStartGate（都已删除）。只在融合线程（主线程）访问；声音回来恢复分析 / 重新开始广播时 reset。
+    private let fusionArbiter = FusionArbiter()
     private var latestBluetoothAction = ""
-
-    // MARK: - 一致性快通道（音视频同 tick 高置信度一致时绕过窗口投票）
-    private let FUSION_FASTPATH_VIDEO_CONF: Float = 0.70
-    private let FUSION_FASTPATH_AUDIO_CONF: Float = 0.70
-
-    // MARK: - 启动仲裁（applyDoStartGate，与 VideoProcessViewController 一致）
-    // 设计前提：实测音频模型准确度高于视频模型，视频不拥有启动否决权，
-    // 只能在强冲突时把启动短暂推迟，且推迟有硬上限（绝不永久阻塞）。
-    private let VIDEO_PLOT_CONFLICT_CONF: Float = 0.80   // 构成「强冲突」所需的视频剧情置信度
-    private let FUSION_CONFLICT_MARGIN: Float = 0.15     // 视频需领先音频的置信度差
-    private let CONFLICT_MAX_HOLD_TICKS = 4              // 冲突延迟上限，超过后强制放行
-    private let AUDIO_STRONG_START_CONF: Float = 0.75    // 强音频直通启动门槛
-    private let AUDIO_ONLY_START_TICKS = 2               // 弱证据启动所需连续 tick 数
-    private var audioOnlyDoStreak = 0                    // 弱证据 do 连续计数（仅融合线程访问）
-    private var conflictHoldTicks = 0                    // 强冲突连续计数（仅融合线程访问）
 
     // MARK: - 蓝牙状态管理
     private var pendingBluetoothState  = ""
@@ -561,6 +545,8 @@ class OnlineAnalysisViewController: UIViewController {
             statusLabel.text = "⚠️ App Groups 未配置，数据无法传输"
             // updateDiag(extensionConnected: true, ipcOk: false)
         }
+        // 🆕 [融合仲裁] 同一个页面里可以停止再重新开始广播：上一次广播的证据不能带进这一次
+        fusionArbiter.reset(FusionArbiter.nowMs())
         startAnalysisLoops()
         print("[在线模式] 广播已开始，IPC读端=\(ipcOk ? "就绪" : "失败（检查App Groups配置）")")
     }
@@ -888,7 +874,9 @@ class OnlineAnalysisViewController: UIViewController {
                      probs.count > 1 ? probs[1] : 0,
                      probs.count > 2 ? probs[2] : 0))
 
-        analysisResults.videoResult = (action, confidence, Date().timeIntervalSince1970 * 1000)
+        // 动作 + 置信度 + 产出时刻打包成一个对象整体发布（融合仲裁按产出时刻去重，三者必须来自同一次推理）
+        analysisResults.videoResult = FusionArbiter.Result(action: action, conf: confidence,
+                                                           tsMs: FusionArbiter.nowMs())
 
         DispatchQueue.main.async {
             if action.isEmpty {
@@ -932,7 +920,9 @@ class OnlineAnalysisViewController: UIViewController {
                 }
             }
 
-            analysisResults.audioResult = (action, outConf, Date().timeIntervalSince1970 * 1000)
+            // 动作 + 置信度 + 产出时刻打包成一个对象整体发布（融合仲裁按产出时刻去重，三者必须来自同一次推理）
+            analysisResults.audioResult = FusionArbiter.Result(action: action, conf: outConf,
+                                                               tsMs: FusionArbiter.nowMs())
             print(String(format: "🎵 [在线-音频] 识别结果: %@ (idx=%d, raw_p=%.3f)",
                          action.isEmpty ? "(unclear)" : action, index, confidence))
 
@@ -955,22 +945,26 @@ class OnlineAnalysisViewController: UIViewController {
     // MARK: - 融合
 
     private func performFusion() {
+        // 每一路只读一个结果对象（动作、置信度、产出时刻来自同一次推理）；先读结果再取 now，保证结果时刻 <= now
         let vRes     = analysisResults.videoResult
         let aRes     = analysisResults.audioResult
         let loud     = analysisResults.audioLoudnessLevel
         // 视频节律已移除
         // let vFreqRes = analysisResults.videoFreq
-        let now      = Date().timeIntervalSince1970 * 1000
-        let MAX_AGE  = 2000.0
+        let now      = FusionArbiter.nowMs()
+        let MAX_AGE: Int64 = 2000
 
-        let vAge    = vRes.timestamp > 0 ? now - vRes.timestamp        : Double.greatestFiniteMagnitude
-        let aAge    = aRes.timestamp > 0 ? now - aRes.timestamp        : Double.greatestFiniteMagnitude
-        let loudAge = loud.tsMs > 0      ? now - Double(loud.tsMs)     : Double.greatestFiniteMagnitude
+        let vTs     = vRes?.tsMs ?? 0
+        let aTs     = aRes?.tsMs ?? 0
+        let loudAge: Int64 = loud.tsMs > 0 ? now - loud.tsMs : Int64.max
 
-        let vAction = vAge  < MAX_AGE ? vRes.action     : ""
-        let aAction = aAge  < MAX_AGE ? aRes.action     : ""
-        let vConf   = vAge  < MAX_AGE ? vRes.confidence : Float(0)
-        let aConf   = aAge  < MAX_AGE ? aRes.confidence : Float(0)
+        // 2 秒新鲜度过滤（与离线模式、Android 一致：还没有结果或超过 2 秒的结果按 unclear 处理）
+        var vAction = vRes?.action ?? ""
+        var aAction = aRes?.action ?? ""
+        var vConf: Float = vRes?.conf ?? 0
+        var aConf: Float = aRes?.conf ?? 0
+        if vTs <= 0 || now - vTs > MAX_AGE { vAction = ""; vConf = 0 }
+        if aTs <= 0 || now - aTs > MAX_AGE { aAction = ""; aConf = 0 }
         let aLevel: Float  = (loud.valid && loudAge < MAX_AGE) ? Float(loud.level) : .nan
         let aLConf: Float  = (loud.valid && loudAge < MAX_AGE) ? loud.conf : 0
 
@@ -979,12 +973,14 @@ class OnlineAnalysisViewController: UIViewController {
         // if aAction == "oral" { aAction = "do" }
 
         let finalFreq   = computeFinalFreq(audioHz: aLevel, audioConf: aLConf, videoHz: .nan, videoConf: 0)
-        var finalAction = smoothedFusion(videoAction: vAction, audioAction: aAction, videoConf: vConf, audioConf: aConf)
 
-        // 🆕 启动仲裁：仅约束「非 do 状态 → 启动 do」；维持阶段音频可单独维持
-        finalAction = applyDoStartGate(finalAction: finalAction,
-                                       videoAction: vAction, videoConf: vConf,
-                                       audioAction: aAction, audioConf: aConf)
+        // 🆕 融合仲裁：启动 / 维持 / 停止分开判断，证据按"新推理结果"计数（按产出时刻去重）。
+        // 过期结果的产出时刻照样传进去，账本自己去重 / 丢弃；motorOn 必须在 updateBluetoothState 之前取
+        let finalAction = fusionArbiter.decide(now: now,
+                                               vAction: vAction, vConf: vConf, vTs: vTs > 0 ? vTs : -1,
+                                               aAction: aAction, aConf: aConf, aTs: aTs > 0 ? aTs : -1,
+                                               motorOn: isSexAction(currentBluetoothState))
+        print("[融合仲裁] \(fusionArbiter.lastReason) -> \(finalAction.isEmpty ? "(不驱动)" : finalAction)")
 
         if !finalAction.isEmpty { updateBluetoothState(finalAction, finalFreq) }
         tvOverlay.text = latestBluetoothAction.isEmpty
@@ -993,28 +989,52 @@ class OnlineAnalysisViewController: UIViewController {
     }
 
     // MARK: - 暂停 / 恢复
+    // 在线模式只在静音时暂停（handleSilenceDetection）。这两个方法可能在 Darwin 通知线程被调用，
+    // 而蓝牙状态和融合仲裁约定只在融合线程（主线程）访问，所以这部分切到主线程执行。
 
     private func pauseAnalysis() {
         isAnalysisPaused = true
-        if BluetoothManager.shared.isConnected && !BluetoothManager.shared.isPausedByLocal {
-            BluetoothManager.shared.sendAction("Noise", 0)
-        }
-        // 🆕 静音重置（对齐 Android 在线模式）：清空动作历史 + 启动仲裁计数器归零。
-        // 本方法可能在 Darwin 通知线程被调用，而计数器约定只在融合线程（主线程）读写，
-        // 故整块派发到主线程；这样融合 tick（同在主线程）也不会插在两者之间看到半清状态。
-        DispatchQueue.main.async { [weak self] in
+        runOnMain { [weak self] in
             guard let self else { return }
-            self.historyLock.lock()
-            self.actionHistory.removeAll()
-            self.historyLock.unlock()
-            self.audioOnlyDoStreak = 0
-            self.conflictHoldTicks = 0
+            // 在主线程发 Noise：主线程上正在跑的融合 tick 可能刚发出一个 "do"（比如档位重发），
+            // 排在它之后发，保证设备上最后一条是 Noise；之后的 tick 看到暂停标志不会再发
+            if BluetoothManager.shared.isConnected && !BluetoothManager.shared.isPausedByLocal {
+                BluetoothManager.shared.sendAction("Noise", 0)
+            }
+            // 🆕 [融合仲裁] 把蓝牙状态同步成 Noise（对齐 Android 在线模式）：设备已经收到 Noise，
+            // 状态机如果还以为马达在转，恢复后维持阶段重申的 "do" 不会真正发出去，表现为"声音回来了杯子却不转"
+            if self.isSexAction(self.currentBluetoothState) {
+                let now = Date().timeIntervalSince1970 * 1000
+                self.currentBluetoothState = "Noise"
+                self.currentStateStartTime = now
+                self.pendingBluetoothState = "Noise"
+                self.pendingStateStartTime = now
+                self.lastBluetoothSendTime = now
+                self.lastSentLevel = 0
+                self.latestBluetoothAction = "Noise"
+            }
+            // 原来这里清空投票历史（对应 Android 静音 5 秒后的 resetAnalysisBuffers），投票窗已删除。
+            // 暂停期间融合循环不调 decide，融合仲裁的证据在恢复时统一清空（resumeAnalysis）
         }
         // refreshDiagIfNeeded()
     }
     private func resumeAnalysis() {
         isAnalysisPaused = false
+        // 🆕 [融合仲裁] 暂停前的证据已经过时，清空重来。在线模式只在静音时暂停，恢复后头一两个结果的模型窗口里
+        // 还混着静音，一并丢掉（音频兜底启动要求窗口内全是"转"，一个陈旧的"不转"就会把启动拖后 9 秒）
+        runOnMain { [weak self] in
+            self?.fusionArbiter.reset(FusionArbiter.nowMs(), warmupMs: FusionArbiter.silenceResumeWarmupMs)
+        }
         // refreshDiagIfNeeded()
+    }
+
+    /// 已在主线程就直接执行，否则切到主线程（Darwin 通知回调所在的线程不确定）
+    private func runOnMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async(execute: block)
+        }
     }
 
     // MARK: - 停止
@@ -1105,125 +1125,6 @@ class OnlineAnalysisViewController: UIViewController {
     }
     
     // MARK: - ===== 以下与 VideoProcessViewController 逻辑完全一致 =====
-
-    private func smoothedFusion(videoAction: String, audioAction: String,
-                                 videoConf: Float, audioConf: Float) -> String {
-        historyLock.lock(); defer { historyLock.unlock() }
-        actionHistory.append(ActionRecord(videoAction: videoAction, audioAction: audioAction,
-                                          videoConfidence: videoConf, audioConfidence: audioConf,
-                                          timestamp: Date().timeIntervalSince1970))
-        while actionHistory.count > SMOOTH_WINDOW_SIZE { actionHistory.removeFirst() }
-
-        // 🆕 一致性快通道：两个模态同 tick 高置信度一致时没有抖动嫌疑，不必攒票。
-        // 注意：本 tick 的记录已先入窗（见上），保证窗口不漏账。
-        if !videoAction.isEmpty
-            && videoAction == audioAction
-            && videoConf >= FUSION_FASTPATH_VIDEO_CONF
-            && audioConf >= FUSION_FASTPATH_AUDIO_CONF {
-            print(String(format: "[快通道] 音视频一致 %@ (v=%.2f a=%.2f)，绕过窗口投票",
-                         videoAction, videoConf, audioConf))
-            return videoAction
-        }
-
-        if actionHistory.count < 3 {
-            return selectBestAction(vA: videoAction, aA: audioAction, vC: videoConf, aC: audioConf)
-        }
-        var scores = [String: Float](); var counts = [String: Int]()
-        for (i, rec) in actionHistory.enumerated() {
-            let w = Float(i + 1) / Float(actionHistory.count)
-            if !rec.videoAction.isEmpty && rec.videoAction != "Background" {
-                scores[rec.videoAction, default: 0] += rec.videoConfidence * w * 0.7
-                counts[rec.videoAction, default: 0] += 1
-            }
-            if !rec.audioAction.isEmpty {
-                scores[rec.audioAction, default: 0] += rec.audioConfidence * w * 1.2
-                counts[rec.audioAction, default: 0] += 1
-            }
-        }
-        var best = ""; var bestScore: Float = 0
-        for (a, s) in scores { if (counts[a] ?? 0) >= SMOOTH_MIN_COUNT && s > bestScore { bestScore = s; best = a } }
-        if best.isEmpty, let last = actionHistory.last {
-            best = selectBestAction(vA: last.videoAction, aA: last.audioAction,
-                                    vC: last.videoConfidence, aC: last.audioConfidence)
-        }
-        return best
-    }
-
-    private func selectBestAction(vA: String, aA: String, vC: Float, aC: Float) -> String {
-        if !aA.isEmpty && (aA != "Noise" || aC > 0.7) { return aA }
-        if !vA.isEmpty && vA != "Background" && (vA != "Noise" || vC > 0.7) { return vA }
-        if aA == "Noise" || vA == "Noise" { return "Noise" }
-        return ""
-    }
-
-    // 🆕 MARK: - 启动仲裁：applyDoStartGate（与 VideoProcessViewController 一致）
-    // 作用范围仅限「从非 do 状态启动 do」；已在 do 状态时（维持阶段）音频可单独维持，不受任何限制。
-    // 设计前提：实测音频模型准确度高于视频模型 —— 视频不拥有否决权，
-    // 只能在与音频强烈冲突时把启动短暂推迟，且推迟有硬上限（最坏 4+2=6 tick ≈ 3 秒后必然放行）。
-    // 返回 "" 表示本 tick 不驱动蓝牙状态机（融合循环对空结果直接跳过发送），维持现状，不主动发 Noise。
-    // 两个计数器只在融合线程（主线程）读写，无需加锁；窗口证据检索需持有 historyLock。
-    private func applyDoStartGate(finalAction: String,
-                                  videoAction: String, videoConf: Float,
-                                  audioAction: String, audioConf: Float) -> String {
-        if finalAction != "do" {
-            audioOnlyDoStreak = 0
-            conflictHoldTicks = 0
-            return finalAction
-        }
-        // 「当前蓝牙状态已是 do」读的是状态机已确认执行中的动作，不是融合输出
-        if currentBluetoothState == "do" {
-            audioOnlyDoStreak = 0
-            conflictHoldTicks = 0
-            return finalAction
-        }
-
-        // —— 以下为启动阶段 ——
-        let audioDoConf: Float = (audioAction == "do") ? audioConf : 0
-
-        // 规则1 强冲突延迟（有上限，绝不永久阻塞）
-        let strongConflict = videoAction == "Noise"
-            && videoConf >= VIDEO_PLOT_CONFLICT_CONF
-            && (videoConf - audioDoConf) >= FUSION_CONFLICT_MARGIN
-        if strongConflict {
-            conflictHoldTicks += 1
-            if conflictHoldTicks <= CONFLICT_MAX_HOLD_TICKS {
-                print(String(format: "[启动仲裁] 强冲突：视频剧情 %.2f vs 音频 do %.2f，延迟启动 (%d/%d)",
-                             videoConf, audioDoConf, conflictHoldTicks, CONFLICT_MAX_HOLD_TICKS))
-                return ""   // 本 tick 不启动
-            }
-            // 超过上限 → 视频可能在系统性误判，按「音频更可信」继续往下走规则 2–4
-            print("[启动仲裁] 强冲突超过上限，视频可能在系统性误判，按音频证据继续")
-        } else {
-            conflictHoldTicks = 0
-        }
-
-        // 规则2 强音频直通
-        if audioDoConf >= AUDIO_STRONG_START_CONF {
-            audioOnlyDoStreak = 0
-            print(String(format: "[启动仲裁] 音频 do 置信度 %.2f 达直通门槛 %.2f，放行",
-                         audioDoConf, AUDIO_STRONG_START_CONF))
-            return finalAction
-        }
-
-        // 规则3 视频证据放行（平滑窗口内存在任一条 videoAction == "do"）
-        historyLock.lock()
-        let hasVideoDoEvidence = actionHistory.contains { $0.videoAction == "do" }
-        historyLock.unlock()
-        if hasVideoDoEvidence {
-            audioOnlyDoStreak = 0
-            print("[启动仲裁] 平滑窗口内存在视频 do 证据，放行")
-            return finalAction
-        }
-
-        // 规则4 弱证据兜底
-        audioOnlyDoStreak += 1
-        if audioOnlyDoStreak >= AUDIO_ONLY_START_TICKS {
-            print(String(format: "[启动仲裁] 弱证据连续 %d tick，兜底放行", audioOnlyDoStreak))
-            return finalAction
-        }
-        print(String(format: "[启动仲裁] 弱证据 %d/%d tick，暂不启动", audioOnlyDoStreak, AUDIO_ONLY_START_TICKS))
-        return ""
-    }
 
     // MARK: - 更新蓝牙状态 - 二级平滑策略
     private func updateBluetoothState(_ newAction: String, _ finalFreq: Int) {
