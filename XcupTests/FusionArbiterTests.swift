@@ -5,6 +5,7 @@
 //  对应 Android FusionArbiterTest.java。最重要的是 matchesAndroidGolden：Android、iOS、bench/tools/fusion_lab.py
 //  三端用同一份 arbiter_golden.csv（python3 bench/tools/fusion_lab.py golden 生成，取自 Android
 //  app/src/test/resources/fusion/），逐 tick 校验动作和原因一致；两边不一致，Android 离线评估出的效果在 iOS 上就不成立。
+//  v2 起每行带音频线索（a_cue 列：真实片段 + 边界用例 + 随机序列），视频单独启动和对白否决真正决定输出的行都在里面。
 //  Android 改了规则或参数会重新生成这个文件，换上新文件再跑一遍即可。
 //
 
@@ -25,20 +26,20 @@ struct FusionArbiterTests {
         return FileManager.default.fileExists(atPath: local.path) ? local : nil
     }
 
-    /// 逐行回放对拍数据，动作和原因都要一致；第一处不一致就停下，报出行号和期望值。
+    /// 逐行回放对拍数据（同一个仲裁对象从头跑到尾），动作和原因都要一致；第一处不一致就停下，报出行号和期望值。
     @Test func matchesAndroidGolden() throws {
         let url = try #require(Self.goldenURL(), "缺少测试资源 arbiter_golden.csv")
         let text = try String(contentsOf: url, encoding: .utf8)
         var lines = text.split(whereSeparator: \.isNewline).map(String.init)
         try #require(!lines.isEmpty, "arbiter_golden.csv 是空的")
         #expect(lines.removeFirst()
-                == "reset,now,v_action,v_conf,v_ts,a_action,a_conf,a_ts,motor_on,exp_action,exp_reason")
+                == "reset,now,v_action,v_conf,v_ts,a_action,a_conf,a_ts,a_cue,motor_on,exp_action,exp_reason")
         let arb = FusionArbiter()
         var n = 0
         for (k, line) in lines.enumerated() {
             let row = "golden 第 \(k + 2) 行"
             let f = line.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            try #require(f.count == 11, "\(row) 列数不对：\(line)")
+            try #require(f.count == 12, "\(row) 列数不对：\(line)")
             if !f[0].isEmpty {                                   // reset 列：<ms> 或 <ms>+<预热ms>
                 let p = f[0].split(separator: "+", omittingEmptySubsequences: false).map(String.init)
                 let at = try #require(Int64(p[0]), "\(row) reset 列：\(f[0])")
@@ -51,15 +52,17 @@ struct FusionArbiterTests {
             let vTs = try #require(Int64(f[4]), "\(row) v_ts")
             let aConf = try #require(Float(f[6]), "\(row) a_conf")
             let aTs = try #require(Int64(f[7]), "\(row) a_ts")
+            let cue = AudioCue.fromName(f[8])
+            try #require(AudioCue.name(cue) == f[8], "\(row) a_cue 写法：\(f[8])")
             let got = arb.decide(now: now,
                                  vAction: f[2], vConf: vConf, vTs: vTs,
-                                 aAction: f[5], aConf: aConf, aTs: aTs,
-                                 motorOn: f[8] == "1")
-            try #require(got == f[9] && arb.lastReason == f[10],
-                         "\(row)：期望 \(f[9])/\(f[10])，实际 \(got)/\(arb.lastReason)")
+                                 aAction: f[5], aConf: aConf, aTs: aTs, aCue: cue,
+                                 motorOn: f[9] == "1")
+            try #require(got == f[10] && arb.lastReason == f[11],
+                         "\(row)：期望 \(f[10])/\(f[11])，实际 \(got)/\(arb.lastReason)")
             n += 1
         }
-        #expect(n >= 5000, "对拍数据太少：\(n)")
+        #expect(n >= 10000, "对拍数据太少：\(n)")
     }
 
     private static let T: Int64 = 1_700_000_000_000
@@ -234,5 +237,108 @@ struct FusionArbiterTests {
         #expect(arb.decide(now: T + 10000 + FusionArbiter.unclearMaxMs - 1, vAction: "", vConf: 0, vTs: -1,
                            aAction: "", aConf: 0, aTs: -1, motorOn: true) == "do")
         #expect(!arb.lastDoHadEvidence)                    // wait_sparse / wait_unclear
+    }
+
+    /// v2 视频单独启动：音频连续 4 个结果都听不出（被音乐盖住，分类头判"不转"），视频强"转"又稳时启动（start_video）；
+    /// 同样的输入不带线索（unknown，即 v1）就一直不启动。
+    @Test func videoStartsAloneWhenAudioUninformative() {
+        let T = Self.T
+        let cues = [AudioCue.music, AudioCue.quiet, AudioCue.blind, AudioCue.music]
+        for withCue in [true, false] {
+            let arb = FusionArbiter()
+            arb.reset(T)
+            var g = ""
+            for k in 2...8 {
+                let now = T + 500 * Int64(k)
+                let aTs = now / 1000 * 1000                    // 音频 1 秒一个结果：T+1000 … T+4000
+                let cue = withCue ? cues[Int((aTs - T) / 1000) - 1] : AudioCue.unknown
+                g = arb.decide(now: now, vAction: "do", vConf: 0.95, vTs: now - 5,
+                               aAction: "Noise", aConf: 0.9, aTs: aTs, aCue: cue, motorOn: false)
+                if k < 8 {
+                    #expect(g == "Noise", "tick \(k)")        // 音频还不到 4 个结果：有"不转"证据，不启动
+                }
+            }
+            if withCue {
+                #expect(g == "do")
+                #expect(arb.lastReason == FusionArbiter.rStartVideo)
+                #expect(arb.lastDoHadEvidence)
+            } else {
+                #expect(g == "Noise")
+                #expect(arb.lastReason == FusionArbiter.rOffNeg)
+            }
+        }
+    }
+
+    /// 视频单独启动要 4 个都听不出：中间夹一个"其它"线索就不启动。
+    @Test func videoStartNeedsFourUninformative() {
+        let T = Self.T
+        let arb = FusionArbiter()
+        arb.reset(T)
+        let cues = [AudioCue.music, AudioCue.other, AudioCue.blind, AudioCue.music]
+        var g = ""
+        for k in 2...8 {
+            let now = T + 500 * Int64(k)
+            let aTs = now / 1000 * 1000
+            g = arb.decide(now: now, vAction: "do", vConf: 0.95, vTs: now - 5,
+                           aAction: "Noise", aConf: 0.9, aTs: aTs, aCue: cues[Int((aTs - T) / 1000) - 1],
+                           motorOn: false)
+        }
+        #expect(g == "Noise")
+        #expect(arb.lastReason == FusionArbiter.rOffNeg)
+    }
+
+    /// v2 对白否决：视频最近 4 个都是 ≥0.90 的"剧情"时，对白线索的音频"转"不算启动证据，音频兜底不启动；
+    /// 视频置信度不到 0.90，或者音频线索是人声 / 未知时，照常由音频兜底启动（与 v1 相同）。
+    @Test func dialogVetoBlocksAudioValveOnlyWhenVideoSurePlot() {
+        let T = Self.T
+        let cases: [(vConf: Float, cue: Int, action: String, reason: String)] = [
+            (0.95, AudioCue.dialog, "Noise", FusionArbiter.rOffNeg),
+            (0.89, AudioCue.dialog, "do", FusionArbiter.rStartAudio),
+            (0.95, AudioCue.vocal, "do", FusionArbiter.rStartAudio),
+            (0.95, AudioCue.unknown, "do", FusionArbiter.rStartAudio),
+        ]
+        for c in cases {
+            let arb = FusionArbiter()
+            arb.reset(T)
+            var g = ""
+            for k in 0..<4 {
+                let kk = Int64(k)
+                let vTs = T + 500 + 1000 * kk
+                _ = arb.decide(now: vTs + 5, vAction: "Noise", vConf: c.vConf, vTs: vTs,
+                               aAction: k > 0 ? "do" : "", aConf: 0.8, aTs: k > 0 ? T + 1000 * kk : -1,
+                               aCue: c.cue, motorOn: false)
+                g = arb.decide(now: T + 1000 * (kk + 1) + 10, vAction: "Noise", vConf: c.vConf, vTs: vTs,
+                               aAction: "do", aConf: 0.8, aTs: T + 1000 * (kk + 1),
+                               aCue: c.cue, motorOn: false)
+            }
+            let what = "视频 \(c.vConf) 线索 \(AudioCue.name(c.cue))"
+            #expect(g == c.action, "\(what)")
+            #expect(arb.lastReason == c.reason, "\(what)")
+        }
+    }
+
+    /// 维持不看线索：马达在转时，视频确定是剧情、音频是对白线索的"转"，照样靠音频维持。
+    @Test func holdIgnoresDialogCue() {
+        let T = Self.T
+        let arb = FusionArbiter()
+        arb.reset(T)
+        var g = ""
+        for k in 1...6 {
+            let now = T + 1000 * Int64(k)
+            g = arb.decide(now: now, vAction: "Noise", vConf: 0.95, vTs: now - 300,
+                           aAction: "do", aConf: 0.95, aTs: now - 10, aCue: AudioCue.dialog, motorOn: true)
+        }
+        #expect(g == "do")
+        #expect(arb.lastReason == FusionArbiter.rHoldAudio)
+    }
+
+    /// 参数行与 Android FusionArbiter.paramsLine() 逐字相同（bench 工具靠 ARB=v2 选回放规则）。
+    @Test func paramsLineMatchesAndroid() {
+        let expected: String = "ARB=v2 ARB_V_FLOOR=0.8500 ARB_A_FLOOR=0.9000 ARB_C_WIN=3000 ARB_C_V=2 ARB_C_A=1 "
+            + "ARB_Z_WIN=9000 ARB_Z_N=4 ARB_MA_N=4 ARB_MA_K=3 ARB_MV_N=4 ARB_MV_K=2 ARB_M_MAX=12000 "
+            + "ARB_CONS_WIN=6000 ARB_V_CONS=70 ARB_NEG_WIN=4000 ARB_UNCLEAR_MAX=6000 ARB_MAX_AGE=2000 "
+            + "ARB_KEEP=20000 ARB_COLD=6000 ARB_START_V_CONS=80 ARB_START_MA_K=4 "
+            + "ARB_A1_N=4 ARB_A1_CV=3 ARB_A1_CONS=90 ARB_BV_N=4 ARB_BV_CONF=0.9000"
+        #expect(FusionArbiter.paramsLine() == expected)
     }
 }

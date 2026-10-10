@@ -13,9 +13,9 @@ Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在�
 - 本地视频分析：从系统照片或文件选择器载入视频，播放过程中同步分析画面与音频。
 - 在线/直播分析：提供与 Android 在线模式对应的实时画面分析能力。
 - 端侧视觉推理：使用 MobileNetV3Small TFLite 模型识别剧情、口部动作和性交动作三类画面。
-- 端侧音频推理：使用 YAMNet 与自定义分类器识别动作类别。
+- 端侧音频推理：使用 YAMNet 与自定义分类器识别动作类别；同一次推理还读取 YAMNet 自带的 AudioSet 521 类分数，判断这一刻音频靠不靠得住（音频线索：对白、音乐、安静、听不出、人声、拍打等）。
 - 节律强度估计：根据 PCM 音频生成离散强度档位，并与动作状态一同发送给硬件。
-- 多模态融合（融合仲裁）：把马达的启动、维持、停止分开判断，证据按新推理结果计数；启动要两路佐证或持续的音频证据，维持只要任一路有支持，降低单模态误判造成的误转和动作中误停。
+- 多模态融合（融合仲裁 v2）：把马达的启动、维持、停止分开判断，证据按新推理结果计数；启动要两路佐证或持续的音频证据，维持只要任一路有支持，降低单模态误判造成的误转和动作中误停。启动时还参考音频线索：音频被背景音乐盖住、连续听不出时允许视频单独启动；视频确定是剧情时，对白引起的音频误判不算启动证据。
 - BLE 控制：使用 CoreBluetooth 实现自动扫描、连接、协议帧构建、CRC 校验、状态解析和指令发送。
 - 手动电子菜单：在 App 内直接选择变频模式（1-3）与马达强度（0-10 档），无需在设备上轮询实体按键。
 - 本地按键优先：硬件按键可暂停 App 控制，用户可在主界面手动恢复。
@@ -54,8 +54,8 @@ flowchart TB
 系统主要由三个并行工作链路组成：
 
 1. 视频链路按播放时间提取帧，维护 12 帧时序窗口，并周期性执行 MobileNetV3Small 推理。
-2. 音频链路把音频统一处理为 16 kHz PCM，从环形缓冲区读取最近约 2 秒、共 32,000 个采样点的数据并执行 YAMNet 推理，同时估计节律强度。
-3. 融合链路每 500ms 读取最新结果，过滤过期数据，由融合仲裁 `FusionArbiter` 决定本 tick 的动作（启动、维持、停止分开判断），连同音频响度档位交给 BLE 状态管理器发送。
+2. 音频链路把音频统一处理为 16 kHz PCM，从环形缓冲区读取最近约 2 秒、共 32,000 个采样点的数据并执行 YAMNet 推理，用同一次推理的 AudioSet 分数判音频线索（`AudioCue`），同时估计节律强度。
+3. 融合链路每 500ms 读取最新结果（音频结果附带线索），过滤过期数据，由融合仲裁 `FusionArbiter` 决定本 tick 的动作（启动、维持、停止分开判断），连同音频响度档位交给 BLE 状态管理器发送。
 
 视频和音频推理运行在独立后台队列中；UI 更新、融合结果消费和用户交互由主线程协调。共享结果通过线程安全容器、`DispatchQueue` barrier 等机制管理，避免 PCM 缓冲与分析状态发生并发读写冲突。
 
@@ -70,6 +70,7 @@ flowchart TB
 | Handler / Runnable | DispatchQueue、DispatchSourceTimer、CADisplayLink |
 | `PcmCircularBuffer.java` | `PcmCircularBuffer.swift` |
 | `FusionArbiter.java` | `FusionArbiter.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐 tick 校验） |
+| `AudioCue.java` | `AudioCue.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐位校验分组分数和线索） |
 | `AudioInferenceHelper.java` | `AudioInferenceHelper.swift` |
 | Android BLE API | `BluetoothManager.swift` + CoreBluetooth |
 | `synchronized` / 原子变量 | DispatchQueue barrier、同步读取和线程安全结果容器 |
@@ -83,9 +84,10 @@ flowchart TB
 | `VideoFrameExtractor.swift` | 使用 AVAssetImageGenerator 与 CoreImage 按时间提取视频帧 |
 | `AudioDecoder.swift` | 使用 AVAssetReader 解码音频、限速、Seek 并写入 PCM 缓冲区 |
 | `PcmCircularBuffer.swift` | 管理 PCM 环形缓冲、时间窗口读取和并发访问 |
-| `AudioInferenceHelper.swift` | YAMNet 特征提取与自定义音频分类器推理 |
+| `AudioInferenceHelper.swift` | YAMNet 特征提取与自定义音频分类器推理；同一次推理取 AudioSet 521 类分数 |
+| `AudioCue.swift` | 音频线索：AudioSet 分数按含义分组求和，判对白 / 音乐 / 安静 / 听不出 / 人声 / 拍打 / 其它，交给融合仲裁的启动判断 |
 | `ThreadSafeAnalysisResults.swift` | 在线程之间安全保存和读取分析结果 |
-| `FusionArbiter.swift` | 融合仲裁：根据两路的新推理结果决定马达的启动、维持与停止，离线模式与在线模式共用 |
+| `FusionArbiter.swift` | 融合仲裁：根据两路的新推理结果（音频带线索）决定马达的启动、维持与停止，离线模式与在线模式共用 |
 | `ManualControlView.swift` | 手动电子菜单：模式选择、强度滑杆、紧急停止与下发节流 |
 | `BluetoothManager.swift` | BLE 扫描、连接、协议帧编解码、CRC 校验和状态管理 |
 
@@ -104,8 +106,9 @@ flowchart TB
 - 特征提取：预训练 YAMNet
 - 分类器：面向当前任务微调的三分类模型
 - 输入：2 秒、16 kHz、单声道 PCM，共 32,000 个 `Float` 采样点
-- 输出：动作类别、置信度与时间戳
+- 输出：动作类别、置信度与时间戳；另有 YAMNet 自带的 AudioSet 521 类分数（4 帧平均），用来判音频线索
 - iOS 注意事项：YAMNet 输入张量可能使用动态长度，复制 32,000 个采样点前应先将输入张量调整为正确形状，再分配张量内存
+- YAMNet 有 3 个输出（`[帧, 521]` AudioSet 分数、`[帧, 1024]` embedding、频谱图），代码按最后一维认输出，不写死下标；动态长度输入的输出张量要 invoke 之后才有数据，所以在第一次推理后认一次。模型里没有 521 维输出时线索一直是未知，融合仲裁退回 v1 的行为
 
 第三方预训练模型与相关资源仍受各自许可证和使用条款约束。自定义模型是否随仓库提供，请以 Xcode 工程中实际加入 App Target 的资源文件为准。
 

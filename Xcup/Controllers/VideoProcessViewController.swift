@@ -15,8 +15,8 @@ import TensorFlowLite
 class ThreadSafeAnalysisResults {
     private let queue = DispatchQueue(label: "com.xcup.analysisResults", attributes: .concurrent)
 
-    // 视频 / 音频的判定结果：动作 + 置信度 + 产出时刻打包成一个不可变对象，整体发布、整体读出
-    // （融合仲裁按产出时刻去重，三者必须来自同一次推理）。nil = 还没有结果
+    // 视频 / 音频的判定结果：动作 + 置信度 + 产出时刻（音频还有线索）打包成一个不可变对象，整体发布、整体读出
+    // （融合仲裁按产出时刻去重，这几项必须来自同一次推理）。nil = 还没有结果
     private var _videoResult: FusionArbiter.Result?
     private var _audioResult: FusionArbiter.Result?
 
@@ -741,7 +741,7 @@ class VideoProcessViewController: UIViewController {
         if let segment = segment {
             let yamnetStart = Date()
 
-            let (index, confidence, probs) = audioHelper.predict(audioBuffer: segment)
+            let (index, confidence, probs, audioSet) = audioHelper.predict(audioBuffer: segment)
 
             let yamnetTime = Date().timeIntervalSince(yamnetStart) * 1000
             //print(String(format: "🎵 [音频线程] YAMNet 音频分析耗时: %.2f ms", yamnetTime))
@@ -773,13 +773,18 @@ class VideoProcessViewController: UIViewController {
                 }
             }
 
-            // 动作 + 置信度 + 产出时刻打包成一个对象整体发布（unclear 也发布：融合仲裁按产出时刻去重、计数）。
+            // [音频线索] YAMNet 自带的 AudioSet 分数判"这一刻音频靠不靠得住"（对白 / 听不出 / 人声 …），
+            // 只给融合仲裁的启动判断用，不改上面的分类判定（规则见 AudioCue、FusionArbiter）
+            let cue = AudioCue.of(audioSet)
+
+            // 动作 + 置信度 + 产出时刻 + 线索打包成一个对象整体发布（unclear 也发布：融合仲裁按产出时刻去重、计数）。
             // 推理和发布都在 audioAnalysisQueue 上，seek 清 PCM 也在这条串行队列上，两者不会交错
             self.analysisResults.audioResult = FusionArbiter.Result(action: action, conf: outConf,
-                                                                    tsMs: FusionArbiter.nowMs())
+                                                                    tsMs: FusionArbiter.nowMs(), cue: cue)
 
-            print(String(format: "✅ 🎵 [音频线程] 音频类型 = %@, 原始idx=%d, 原始p=%.3f",
-                         action.isEmpty ? "(unclear)" : action, index, confidence))
+            print(String(format: "✅ 🎵 [音频线程] 音频类型 = %@, 原始idx=%d, 原始p=%.3f, 线索=%@",
+                         action.isEmpty ? "(unclear)" : action, index, confidence,
+                         cue == AudioCue.unknown ? "(未知)" : AudioCue.name(cue)))
         }
         
         /*
@@ -862,6 +867,9 @@ class VideoProcessViewController: UIViewController {
         var filteredVideoConfidence: Float = videoResult?.conf ?? 0
         var filteredAudioAction = audioResult?.action ?? ""
         var filteredAudioConfidence: Float = audioResult?.conf ?? 0
+        // 音频线索与音频结果来自同一个结果对象。结果过期时动作串会被清空，线索照样传给仲裁：
+        // 账本只在记新结果时记线索，过期的结果本来就不记
+        let audioCue = audioResult?.cue ?? AudioCue.unknown
 
         // var audioFreq = audioRhythm.hz
         // var audioFreqConf = audioRhythm.conf
@@ -908,15 +916,19 @@ class VideoProcessViewController: UIViewController {
         }
             
         if !filteredAudioAction.isEmpty {
+            // 末尾显示音频线索的中文名（未知时不显示），例如 "A: do (p=0.83) · 人声"
             tvAudioAction.text = String(format: "A: %@ (p=%.2f)", filteredAudioAction, filteredAudioConfidence)
+                + (audioCue == AudioCue.unknown ? "" : " · " + AudioCue.label(audioCue))
         }
             
         // 🆕 融合仲裁：启动 / 维持 / 停止分开判断，证据按"新推理结果"计数（按产出时刻去重）。
-        // 过期结果的产出时刻照样传进去，账本自己去重 / 丢弃；motorOn 必须在 updateBluetoothState 之前取
+        // 过期结果的产出时刻照样传进去，账本自己去重 / 丢弃；motorOn 必须在 updateBluetoothState 之前取。
+        // 音频线索（v2）只用于启动：对白否决、音频听不出时视频单独启动
         let finalAction = fusionArbiter.decide(
             now: now,
             vAction: filteredVideoAction, vConf: filteredVideoConfidence, vTs: videoTs > 0 ? videoTs : -1,
             aAction: filteredAudioAction, aConf: filteredAudioConfidence, aTs: audioTs > 0 ? audioTs : -1,
+            aCue: audioCue,
             motorOn: isSexAction(currentBluetoothState)
         )
         print("[融合仲裁] \(fusionArbiter.lastReason) -> \(finalAction.isEmpty ? "(不驱动)" : finalAction)")

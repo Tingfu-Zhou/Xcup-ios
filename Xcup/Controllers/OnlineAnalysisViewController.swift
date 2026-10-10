@@ -895,7 +895,7 @@ class OnlineAnalysisViewController: UIViewController {
     private func performAudioAnalysis() {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         if let segment = pcmBuffer.readWindowRelaxed(currentTimeMs: nowMs, sampleCount: 32000) {
-            let (index, confidence, probs) = audioHelper.predict(audioBuffer: segment)
+            let (index, confidence, probs, audioSet) = audioHelper.predict(audioBuffer: segment)
 
             let action: String
             let outConf: Float
@@ -920,17 +920,24 @@ class OnlineAnalysisViewController: UIViewController {
                 }
             }
 
-            // 动作 + 置信度 + 产出时刻打包成一个对象整体发布（融合仲裁按产出时刻去重，三者必须来自同一次推理）
-            analysisResults.audioResult = FusionArbiter.Result(action: action, conf: outConf,
-                                                               tsMs: FusionArbiter.nowMs())
-            print(String(format: "🎵 [在线-音频] 识别结果: %@ (idx=%d, raw_p=%.3f)",
-                         action.isEmpty ? "(unclear)" : action, index, confidence))
+            // [音频线索] YAMNet 自带的 AudioSet 分数判"这一刻音频靠不靠得住"，只给融合仲裁的启动判断用
+            // （规则见 AudioCue、FusionArbiter；与离线模式相同）
+            let cue = AudioCue.of(audioSet)
 
+            // 动作 + 置信度 + 产出时刻 + 线索打包成一个对象整体发布（融合仲裁按产出时刻去重，必须来自同一次推理）
+            analysisResults.audioResult = FusionArbiter.Result(action: action, conf: outConf,
+                                                               tsMs: FusionArbiter.nowMs(), cue: cue)
+            print(String(format: "🎵 [在线-音频] 识别结果: %@ (idx=%d, raw_p=%.3f, 线索=%@)",
+                         action.isEmpty ? "(unclear)" : action, index, confidence,
+                         cue == AudioCue.unknown ? "(未知)" : AudioCue.name(cue)))
+
+            // 末尾显示音频线索的中文名（未知时不显示），例如 "A: do (0.83) · 人声"
+            let cueText = cue == AudioCue.unknown ? "" : " · " + AudioCue.label(cue)
             DispatchQueue.main.async {
                 if action.isEmpty {
-                    self.tvAudioAction.text = "A: (unclear)"
+                    self.tvAudioAction.text = "A: (unclear)" + cueText
                 } else {
-                    self.tvAudioAction.text = String(format: "A: %@ (%.2f)", action, outConf)
+                    self.tvAudioAction.text = String(format: "A: %@ (%.2f)", action, outConf) + cueText
                 }
             }
         }
@@ -975,10 +982,12 @@ class OnlineAnalysisViewController: UIViewController {
         let finalFreq   = computeFinalFreq(audioHz: aLevel, audioConf: aLConf, videoHz: .nan, videoConf: 0)
 
         // 🆕 融合仲裁：启动 / 维持 / 停止分开判断，证据按"新推理结果"计数（按产出时刻去重）。
-        // 过期结果的产出时刻照样传进去，账本自己去重 / 丢弃；motorOn 必须在 updateBluetoothState 之前取
+        // 过期结果的产出时刻照样传进去，账本自己去重 / 丢弃；motorOn 必须在 updateBluetoothState 之前取。
+        // 音频线索与音频结果来自同一个 Result（过期时动作串清空，线索照样传，账本只在记新结果时记线索）
         let finalAction = fusionArbiter.decide(now: now,
                                                vAction: vAction, vConf: vConf, vTs: vTs > 0 ? vTs : -1,
                                                aAction: aAction, aConf: aConf, aTs: aTs > 0 ? aTs : -1,
+                                               aCue: aRes?.cue ?? AudioCue.unknown,
                                                motorOn: isSexAction(currentBluetoothState))
         print("[融合仲裁] \(fusionArbiter.lastReason) -> \(finalAction.isEmpty ? "(不驱动)" : finalAction)")
 
