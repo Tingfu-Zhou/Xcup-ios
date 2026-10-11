@@ -36,6 +36,11 @@ struct ContentView: View {
     // 设备被本地按键锁定时，仍可在手动电子菜单页点「恢复控制」。
     private static let showsResumeControlButton = false
 
+    // [新增] 设备被本地按键锁定时的轻提示（对应 Android 主页的 Toast「设备正在本地控制，暂停app控制」）。
+    // 盖在整个导航栈上（在线模式页单独再加一层），视频分析、手动电子菜单等页面也能看到；不拦截点击，3.5 秒后自动消失
+    @State private var showsLockToast = false
+    @State private var lockToastHideWork: DispatchWorkItem?
+
     // NEW: 更新提示所需状态
     @State private var optionalUpdateInfo: UpdateInfo? = nil       // 可更新
     @State private var showOptionalAlert: Bool = false             // 可更新弹窗
@@ -117,6 +122,10 @@ struct ContentView: View {
                         .fullScreenCover(isPresented: $showOnlineAnalysis) {
                             OnlineAnalysisView()
                                 .ignoresSafeArea()
+                                // 在线模式页是单独弹出的全屏页，主页那层提示盖不到，这里再加一层
+                                .overlay(alignment: .bottom) {
+                                    if showsLockToast { LockToastView() }
+                                }
                         }
 
                         HStack(alignment: .top, spacing: 8) {
@@ -238,6 +247,10 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+        // [新增] 本地按键锁定提示：加在 NavigationView 外层，进到视频分析 / 手动电子菜单页时也在最上面
+        .overlay(alignment: .bottom) {
+            if showsLockToast { LockToastView() }
+        }
     }
     
     // [新增] 设置蓝牙代理
@@ -256,6 +269,10 @@ struct ContentView: View {
                 self.bluetoothStatusText = "未连接"
             },
             onPause: {
+                // 锁定期间每按一次实体按键都会再通知一次 pause，只在「未暂停 → 暂停」时提示一次
+                if !self.isBluetoothPaused {
+                    self.showLockToast()
+                }
                 self.isBluetoothPaused = true
             },
             onResume: {
@@ -291,6 +308,21 @@ struct ContentView: View {
         BluetoothManager.shared.resumeAppControl()
     }
     
+    // [新增] 显示本地按键锁定提示，3.5 秒后自动消失（与 Android 的 Toast.LENGTH_LONG 一样长）
+    private func showLockToast() {
+        lockToastHideWork?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) {
+            showsLockToast = true
+        }
+        let work = DispatchWorkItem {
+            withAnimation(.easeIn(duration: 0.2)) {
+                self.showsLockToast = false
+            }
+        }
+        lockToastHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
+    }
+
     // NEW: 统一的更新检查入口（静默失败）
     private func checkForUpdate() {
         UpdateService.shared.check { result in
@@ -509,5 +541,26 @@ private struct RequiredUpdateView: View {
                     .padding(.top, 8)
             }
         }
+    }
+}
+
+// [新增] 本地按键锁定提示条（对应 Android 的 Toast）：底部圆角条，MD3 反色（浅色模式深底、深色模式浅底）
+private struct LockToastView: View {
+    var body: some View {
+        Text("设备正在本地控制，暂停app控制")
+            .font(.system(size: 14))
+            .foregroundColor(.md3Surface)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color.md3OnSurface.opacity(0.92))
+            )
+            .padding(.horizontal, 24)
+            // 抬到视频分析页的进度条和时间标签上方，不挡住它们
+            .padding(.bottom, 96)
+            // 只是提示，不拦截下面的点击
+            .allowsHitTesting(false)
     }
 }
