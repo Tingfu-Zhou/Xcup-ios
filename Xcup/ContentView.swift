@@ -31,6 +31,11 @@ struct ContentView: View {
     @State private var isBluetoothPaused = false
     @State private var bluetoothStatusText = "未连接"
     
+    // 主页面「已暂停app操作，点击恢复」按钮实际很少用到，先隐藏（与 Android 版一致）。
+    // 暂停回调和点击逻辑都保留，要恢复显示改成 true 即可。
+    // 设备被本地按键锁定时，仍可在手动电子菜单页点「恢复控制」。
+    private static let showsResumeControlButton = false
+
     // NEW: 更新提示所需状态
     @State private var optionalUpdateInfo: UpdateInfo? = nil       // 可更新
     @State private var showOptionalAlert: Bool = false             // 可更新弹窗
@@ -161,14 +166,16 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
 
-                        // [新增] 恢复控制按钮
-                        Button(action: {
-                            handleResumeControl()
-                        }) {
-                            Text("已暂停app操作，点击恢复")
+                        // [新增] 恢复控制按钮（先隐藏，见 showsResumeControlButton）
+                        if Self.showsResumeControlButton {
+                            Button(action: {
+                                handleResumeControl()
+                            }) {
+                                Text("已暂停app操作，点击恢复")
+                            }
+                            .buttonStyle(MD3ErrorFilledButtonStyle())
+                            .disabled(!isBluetoothPaused)
                         }
-                        .buttonStyle(MD3ErrorFilledButtonStyle())
-                        .disabled(!isBluetoothPaused)
 
                         // 2️⃣ 隐形 NavigationLink（带 onDisappear 手动复位）
                         NavigationLink(
