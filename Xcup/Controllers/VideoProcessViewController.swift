@@ -353,7 +353,14 @@ class VideoProcessViewController: UIViewController {
             totalTimeLabel.bottomAnchor.constraint(equalTo: progressSlider.topAnchor, constant: -4)
         ])
 
-        // 视频分析结果 Label
+        // 视频分析结果 Label（调试悬浮窗：视频分析 / 音频分析 / 蓝牙输出结果）
+        // 只在 Debug 构建显示（Xcode 里直接 Run 到手机用的是 Debug），Archive 打出的 Release 包隐藏。
+        // 对应 Android 版看 FLAG_DEBUGGABLE 的做法；只改显隐，分析、融合和蓝牙发送逻辑不变。
+        #if DEBUG
+        let showDebugPanel = true
+        #else
+        let showDebugPanel = false
+        #endif
         let labels = [tvVideoAction, tvAudioAction, tvOverlay]
         let labelTitles = ["V: ", "A: ", "Final: "]
 
@@ -362,6 +369,7 @@ class VideoProcessViewController: UIViewController {
             label.textColor = .white
             label.font = UIFont.systemFont(ofSize: 13)
             label.text = labelTitles[i]
+            label.isHidden = !showDebugPanel
             view.addSubview(label)
 
             NSLayoutConstraint.activate([
