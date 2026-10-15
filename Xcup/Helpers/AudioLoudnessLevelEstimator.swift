@@ -85,6 +85,9 @@ final class AudioLoudnessLevelEstimator {
         let rms = Self.computeRms(pcm)
         let db = 20.0 * log10f(rms + Self.EPS) // dBFS
 
+        // NaN/Inf 防御（对应 Android）：坏数据一旦进来会"毒化" EMA 状态，之后一直异常；直接丢掉这次 push，不更新内部状态
+        guard rms.isFinite, db.isFinite else { return }
+
         if !inited {
             emaDb = db
             noiseFloorDb = min(db, noiseFloorDb)

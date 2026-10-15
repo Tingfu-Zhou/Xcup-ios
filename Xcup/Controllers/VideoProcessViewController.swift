@@ -182,8 +182,11 @@ class VideoProcessViewController: UIViewController {
     private var fusionLoopWorkItem: DispatchWorkItem?
 
     // MARK: - 视频分类滑动窗口（12 帧 × 160×160 × RGB，3s 窗口，500ms 推理步长）
+    // frameBuffer 是模型输入（160×160 ARGB，已按 FramePreprocessor 处理），frameTimeBuffer 是每帧的 pts（ms），一一对应。
+    // 两者只在视频分析队列上读写
     private let FRAME_BUFFER_SIZE: Int = VideoClassifierHelper.TIME  // 12
-    private var frameBuffer: [UIImage] = []
+    private var frameBuffer: [[UInt32]] = []
+    private var frameTimeBuffer: [Int64] = []
     private var lastVideoInferenceMs: Int64 = 0
 
     // MARK: - 视频分组概率阈值（与 Android 对齐：在 oral/sex 归并后的分组概率上判定）
@@ -431,8 +434,8 @@ class VideoProcessViewController: UIViewController {
             object: playerItem
         )
 
-        // 初始化视频帧提取器
-        guard let extractor = VideoFrameExtractor(url: url) else {
+        // 初始化视频帧提取器：给 playerItem 挂上 AVPlayerItemVideoOutput（必须在 play() 之前），取"此刻显示的那一帧"
+        guard let extractor = VideoFrameExtractor(playerItem: playerItem) else {
             print("❌ VideoFrameExtractor 初始化失败")
             return
         }
@@ -630,7 +633,8 @@ class VideoProcessViewController: UIViewController {
 
     // MARK: - 视频分析线程（后台线程）
     //
-    // 每 250ms 一轮：抽 1 帧 → 缩放到 160×160 → 推入环形缓冲（最多 12 帧 = 3 秒窗口）
+    // 每 250ms 一轮：取播放器此刻显示的那一帧（已处理成 160×160 模型输入）→ 推入环形缓冲（最多 12 帧 = 3 秒窗口）
+    //   没有新帧（卡顿、seek 后还没解出来）或与上一帧同一时刻：这一轮不放（窗口应当是 12 个不同时刻）
     //   若 缓冲 < 12 帧：return（预热）
     //   若 now - lastVideoInferenceMs < 500ms：return
     //   否则：classifier.predict(12帧) → 分组概率决策
@@ -650,23 +654,28 @@ class VideoProcessViewController: UIViewController {
             return
         }
 
-        // 1. 抽帧
-        guard let extractor = videoFrameExtractor,
-              let rawFrame = extractor.frame(at: Int64(currentTime * 1_000_000)) else {
-            print("未能提取帧")
+        // 1. 抽帧：此刻屏幕上显示的那一帧，已经居中裁剪、缩到 160×160、转正（VideoFrameExtractor）。
+        //    2026-10-15 之前用 AVAssetImageGenerator + 无限容差，取到的是离播放位置最近的关键帧，同一张图反复放进窗口
+        guard let extractor = videoFrameExtractor else { return }
+        let tExtract = DispatchTime.now()
+        guard let frame = extractor.frameNow() else { return }   // 没有新帧：卡顿、seek 后还没解出来
+        let extractMs = Double(DispatchTime.now().uptimeNanoseconds - tExtract.uptimeNanoseconds) / 1e6
+        // 验收用（iOS 视频检查清单 3.2）：取到的帧与播放位置正常相差不超过一帧（约 33ms），相邻两帧相差约 250ms；
+        // 一段时间不变、然后跳一个关键帧间隔，就是又只取到关键帧了
+        print(String(format: "[计时] 📸 抽帧耗时 %.1f ms（位置 %lldms，取到 %lldms 的帧，差 %lldms）",
+                     extractMs, frame.requestMs, frame.ptsMs, frame.requestMs - frame.ptsMs))
+
+        // 2. 同一帧（时刻相同）不重复放进窗口
+        if let last = frameTimeBuffer.last, last == frame.ptsMs {
             return
         }
 
-        // 2. 缩放为 160×160（RGB 在分类器内部统一处理）
-        guard let frame160 = VideoClassifierHelper.resizeTo160(rawFrame) else {
-            print("❌ [视频线程] 帧缩放失败")
-            return
-        }
-
-        // 3. 推入环形缓冲（最多 12 帧）
-        frameBuffer.append(frame160)
+        // 3. 推入环形缓冲（最多 12 帧），帧和时刻一一对应
+        frameBuffer.append(frame.pixels)
+        frameTimeBuffer.append(frame.ptsMs)
         if frameBuffer.count > FRAME_BUFFER_SIZE {
             frameBuffer.removeFirst(frameBuffer.count - FRAME_BUFFER_SIZE)
+            frameTimeBuffer.removeFirst(frameTimeBuffer.count - FRAME_BUFFER_SIZE)
         }
 
         // 4. 预热不足
@@ -723,6 +732,17 @@ class VideoProcessViewController: UIViewController {
                      probs.count > 0 ? probs[0] : 0,
                      probs.count > 1 ? probs[1] : 0,
                      probs.count > 2 ? probs[2] : 0))
+
+        #if DEBUG
+        // 验收用（iOS 视频检查清单 3.2）：每个视频结果一行，三类概率全精度 + 窗口里 12 帧各自的时刻（同 Android 评测 CSV 的
+        // v_p_* 与 v_fpts）。Xcode 控制台过滤 "VRES,"，去掉前缀就是 pos_ms,p_plot,p_oral,p_sex,v_fpts 五列的 CSV。
+        // 没饱和的结果里"和上一个完全相同"的比例应接近 0（只取关键帧时，关键帧间隔长的片子上是一半以上）
+        if probs.count >= 3 {
+            print("VRES,\(frameTimeBuffer.last ?? -1),"
+                  + String(format: "%.9g,%.9g,%.9g,", probs[0], probs[1], probs[2])
+                  + frameTimeBuffer.map { String($0) }.joined(separator: ";"))
+        }
+        #endif
 
         // 8. 动作 + 置信度 + 产出时刻打包成一个对象整体发布（unclear 也发布：融合仲裁按产出时刻去重、计数）。
         //    推理和发布都在 videoAnalysisQueue 上，seek 清帧窗也在这条串行队列上，两者不会交错
@@ -1307,8 +1327,10 @@ class VideoProcessViewController: UIViewController {
 
             buffersCleared.enter()
             self.videoAnalysisQueue.async {
-                // 🆕 清空视频分类滑动窗口
+                // 🆕 清空视频分类滑动窗口（连同每帧的时刻）。抽帧也在这条串行队列上同步完成，
+                // 清空之后放进来的帧一定是 seek 之后取的
                 self.frameBuffer.removeAll()
+                self.frameTimeBuffer.removeAll()
                 self.lastVideoInferenceMs = 0
 
                 // 旧的姿态/ST-GCN++ 状态已弃用：
@@ -1479,6 +1501,7 @@ class VideoProcessViewController: UIViewController {
         // 清空视频分类滑动窗口
         videoAnalysisQueue.async { [weak self] in
             self?.frameBuffer.removeAll()
+            self?.frameTimeBuffer.removeAll()
             self?.lastVideoInferenceMs = 0
         }
 

@@ -9,6 +9,8 @@
 import ReplayKit
 import AVFoundation
 import CoreMedia
+import CoreImage
+import ImageIO
 import AudioToolbox
 import UIKit
 import Foundation
@@ -312,7 +314,7 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
         audioWriter?.write(output)
     }
 
-    // MARK: - 视频处理（降采样 → JPEG → 共享文件）
+    // MARK: - 视频处理（转正 → 降采样 → JPEG → 共享文件）
 
     private func processVideo(_ sampleBuffer: CMSampleBuffer) {
         let now = Date().timeIntervalSince1970
@@ -320,9 +322,19 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
         lastVideoTime = now
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        // ReplayKit 给的缓冲区总是设备竖着时的方向：横屏全屏看视频时，画面是横躺在里面的，方向写在
+        // RPVideoSampleOrientationKey（CGImagePropertyOrientation）里。先转正，主 App 的预览和送进视频模型的都是正的画面
+        // （模型只见过正的画面；主 App 再从中间裁正方形，见 FramePreprocessor）
+        if let raw = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
+                                     attachmentModeOut: nil) as? NSNumber,
+           let orientation = CGImagePropertyOrientation(rawValue: raw.uint32Value),
+           orientation != .up {
+            ciImage = ciImage.oriented(orientation)
+        }
 
-        let scale = 480.0 / ciImage.extent.width
+        // 短边缩到 480（原来按宽缩到 480：转正后的横屏画面宽是长边，短边只剩约 220，比模型要的 224 还小）
+        let scale = 480.0 / min(ciImage.extent.width, ciImage.extent.height)
         let scaled = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         guard let cgImage = ciContext.createCGImage(scaled, from: scaled.extent) else { return }
         guard let jpeg = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.6) else { return }

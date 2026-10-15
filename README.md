@@ -65,8 +65,9 @@ flowchart TB
 | --- | --- |
 | `VideoProcessActivity.java` | `VideoProcessViewController.swift` |
 | VideoView / ExoPlayer | AVPlayer |
-| MediaExtractor + MediaCodec | AVAssetReader + AVAssetReaderTrackOutput |
-| SurfaceTexture + OpenGL/EGL | AVAssetImageGenerator + CoreImage |
+| MediaExtractor + MediaCodec（音频解码） | AVAssetReader + AVAssetReaderTrackOutput |
+| `VideoFrameExtractor.java` + `EGLRenderer.java`（抽帧） | `VideoFrameExtractor.swift`：AVPlayerItemVideoOutput + vImage |
+| `FramePreprocessor.java` | `FramePreprocessor.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐位校验） |
 | Handler / Runnable | DispatchQueue、DispatchSourceTimer、CADisplayLink |
 | `PcmCircularBuffer.java` | `PcmCircularBuffer.swift` |
 | `FusionArbiter.java` | `FusionArbiter.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐 tick 校验） |
@@ -81,7 +82,8 @@ flowchart TB
 | --- | --- |
 | `ContentView.swift` | 主界面、视频选择、BLE 状态、在线分析入口和导航 |
 | `VideoProcessViewController.swift` | 视频播放、音视频分析、结果融合、UI 更新和 BLE 控制 |
-| `VideoFrameExtractor.swift` | 使用 AVAssetImageGenerator 与 CoreImage 按时间提取视频帧 |
+| `VideoFrameExtractor.swift` | 用 AVPlayerItemVideoOutput 取播放器此刻显示的那一帧，居中裁正方形、vImage 缩到 672×672 后交给 FramePreprocessor，并按 preferredTransform 转正 |
+| `FramePreprocessor.swift` | 视频模型输入的预处理（居中裁正方形、面积平均缩小到 160×160），与训练素材的处理一致，离线、在线两种模式共用 |
 | `AudioDecoder.swift` | 使用 AVAssetReader 解码音频、限速、Seek 并写入 PCM 缓冲区 |
 | `PcmCircularBuffer.swift` | 管理 PCM 环形缓冲、时间窗口读取和并发访问 |
 | `AudioInferenceHelper.swift` | YAMNet 特征提取与自定义音频分类器推理；同一次推理取 AudioSet 521 类分数 |
@@ -97,8 +99,9 @@ flowchart TB
 
 - 骨干网络：MobileNetV3Small + Temporal Average Pooling + 三分类器
 - 模型文件：`mobilenetv3small_tap_3class_float32.tflite`
-- 输入：`[1, 12, 160, 160, 3]`，`float32`，NHWC，RGB
+- 输入：`[1, 12, 160, 160, 3]`，`float32`，NHWC，RGB；12 帧是最近 3 秒里间隔 250ms 的 12 个不同时刻
 - 像素范围：`0-255`，模型内部包含 Rescaling，不应再次归一化
+- 每帧的预处理与训练素材一致：先转正，再居中裁正方形（边长 = 短边），面积平均缩到 224，再缩到 160（`FramePreprocessor`）
 - 输出：`normal_plot`、`oral`、`sex` 三类 softmax 概率
 
 ### 音频模型

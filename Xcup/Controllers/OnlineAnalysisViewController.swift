@@ -81,8 +81,10 @@ class OnlineAnalysisViewController: UIViewController {
     private var fusionLoopItem: DispatchWorkItem?
 
     // MARK: - 视频分类滑动窗口（12 帧 × 160×160，3s 窗口）
+    // 模型输入（160×160 ARGB，已按 FramePreprocessor 处理）；screenPixels 是截屏转像素时复用的缓冲。都只在视频分析队列用
     private let FRAME_BUFFER_SIZE: Int = VideoClassifierHelper.TIME
-    private var frameBuffer: [UIImage] = []
+    private var frameBuffer: [[UInt32]] = []
+    private var screenPixels: [UInt32] = []
     private var lastVideoInferenceMs: Int64 = 0
 
     // MARK: - 分组概率阈值（与 VideoProcessViewController 一致：在归并后的分组概率上判定）
@@ -800,7 +802,7 @@ class OnlineAnalysisViewController: UIViewController {
 
     // MARK: - 视频分析
     //
-    // 每 250ms 一轮：取一帧 → 缩放到 160×160 → 推入环形缓冲（最多 12 帧 = 3 秒窗口）
+    // 每 250ms 一轮：取一帧 → 居中裁正方形、缩到 160×160 → 推入环形缓冲（最多 12 帧 = 3 秒窗口）
     //   若 缓冲 < 12 帧：return（预热）
     //   若 now - lastVideoInferenceMs < 500ms：return
     //   否则：classifier.predict(12帧) → 分组概率决策
@@ -811,9 +813,12 @@ class OnlineAnalysisViewController: UIViewController {
         frameLock.unlock()
         guard let frame = frame else { return }
 
-        // 1. 缩放为 160×160（在线模式原帧通常是全屏 JPEG，及早压小避免缓冲占用过多内存）
-        guard let frame160 = VideoClassifierHelper.resizeTo160(frame) else {
-            print("❌ [在线-视频] 帧缩放失败")
+        // 1. 与训练一致：居中裁正方形 → 面积平均缩到 224 → 160（FramePreprocessor，对应 Android OnlineAnalysisActivity）。
+        //    2026-10-15 之前是整屏直接压扁成 160×160：竖屏看横屏视频时画面只占中间一条，压扁后几乎看不清；居中裁剪至少
+        //    保住中间那块（更好的做法是找出视频画面所在的区域、只裁那块，Android 也还没做）。截屏在广播扩展里已经转正
+        guard let cg = frame.cgImage,
+              let frame160 = VideoClassifierHelper.toModelInput(cg, scratch: &screenPixels) else {
+            print("❌ [在线-视频] 帧预处理失败")
             return
         }
 
