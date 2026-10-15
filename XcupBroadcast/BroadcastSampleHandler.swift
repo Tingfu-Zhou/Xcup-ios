@@ -330,7 +330,7 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
                                      attachmentModeOut: nil) as? NSNumber,
            let orientation = CGImagePropertyOrientation(rawValue: raw.uint32Value),
            orientation != .up {
-            ciImage = ciImage.oriented(orientation)
+            ciImage = ciImage.oriented(uprightOrientation(fromReplayKit: orientation))
         }
 
         // 短边缩到 480（原来按宽缩到 480：转正后的横屏画面宽是长边，短边只剩约 220，比模型要的 224 还小）
@@ -340,5 +340,16 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
         guard let jpeg = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.6) else { return }
 
         videoWriter.write(jpeg: jpeg, timestampMs: Int64(now * 1000))
+    }
+
+    /// RPVideoSampleOrientationKey 的值在两个 90° 方向上与 EXIF 的含义相反（CIImage.oriented 按 EXIF 转）：
+    /// 真机横屏时直接拿原值去转，画面上下颠倒（右上角的"返回主页面"跑到了左下角）。left / right 互换；
+    /// 0°、180° 两种说法一样，原样用
+    private func uprightOrientation(fromReplayKit o: CGImagePropertyOrientation) -> CGImagePropertyOrientation {
+        switch o {
+        case .left:  return .right
+        case .right: return .left
+        default:     return o
+        }
     }
 }

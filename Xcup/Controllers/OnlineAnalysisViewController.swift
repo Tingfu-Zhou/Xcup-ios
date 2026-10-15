@@ -60,6 +60,17 @@ class OnlineAnalysisViewController: UIViewController {
     private var latestFrame: UIImage?
     private let frameLock = NSLock()
 
+    // MARK: - 预览（只管显示，不影响送进模型的画面）
+    // 预览显示的是录到的屏幕，而屏幕上又有这个预览：Xcup 在前台时是"镜子对着镜子"，一层套一层、和屏幕一样大，
+    // 每一帧都是上一帧的拷贝。一闪而过的画面（转屏途中转到一半的界面、宽高比不对时露出的底色、开始录屏时的系统弹窗）
+    // 一旦进了这个循环就会一直留在里面：转屏后的"万花镜"、白边。所以：
+    // 1. 转屏（view 尺寸变了）时先清空预览，等 PREVIEW_ROTATE_HOLD_SEC 再显示，转动过程中录到的帧都不显示；
+    // 2. 预览按 PREVIEW_ALPHA 半透明显示，旧画面每套一层就淡一次（0.7 每帧，约 2 秒后不到 3%），不会永远留着
+    private let PREVIEW_ALPHA: CGFloat = 0.7
+    private let PREVIEW_ROTATE_HOLD_SEC: CFTimeInterval = 1.0
+    private var previewHoldUntil: CFTimeInterval = 0     // 只在主线程读写
+    private var lastLayoutSize: CGSize = .zero           // 只在主线程读写
+
     // MARK: - 推理模块
     // private var inferenceHelper:        InferenceHelper!     // 已弃用：ML Kit + ST-GCN++
     private var videoClassifier:        VideoClassifierHelper!  // MobileNetV3Small + TAP + 3class
@@ -172,6 +183,19 @@ class OnlineAnalysisViewController: UIViewController {
         stopAllActivity()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // 尺寸变了就是转屏（布局在转屏动画一开始就按新尺寸做）：清空预览，转动过程中录到的帧不显示。
+        // 用尺寸变化而不是 viewWillTransition：这个页面嵌在 SwiftUI 里，转屏回调不一定转发到这里
+        let size = view.bounds.size
+        guard size != lastLayoutSize else { return }
+        if lastLayoutSize != .zero {
+            previewImageView.image = nil
+            previewHoldUntil = CACurrentMediaTime() + PREVIEW_ROTATE_HOLD_SEC
+        }
+        lastLayoutSize = size
+    }
+
     deinit {
         videoLoopItem?.cancel()
         audioLoopItem?.cancel()
@@ -188,10 +212,11 @@ class OnlineAnalysisViewController: UIViewController {
     private func setupUI() {
         view.backgroundColor = .md3Background
 
-        // 屏幕预览（广播开始后显示）
+        // 屏幕预览（广播开始后显示）。半透明：录到的画面里又有预览，旧画面要能淡掉（见 PREVIEW_ALPHA）
         previewImageView.translatesAutoresizingMaskIntoConstraints = false
         previewImageView.contentMode = .scaleAspectFit
         previewImageView.backgroundColor = .md3Background
+        previewImageView.alpha = PREVIEW_ALPHA
         view.addSubview(previewImageView)
         NSLayoutConstraint.activate([
             previewImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -591,7 +616,9 @@ class OnlineAnalysisViewController: UIViewController {
         // refreshDiagIfNeeded()
 
         DispatchQueue.main.async { [weak self] in
-            self?.previewImageView.image = image
+            // 转屏后的等待期内不显示（见 viewDidLayoutSubviews）；送进模型的帧不受影响
+            guard let self, CACurrentMediaTime() >= self.previewHoldUntil else { return }
+            self.previewImageView.image = image
         }
     }
 
