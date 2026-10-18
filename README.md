@@ -18,6 +18,7 @@ Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在�
 - 多模态融合（融合仲裁 v2）：把马达的启动、维持、停止分开判断，证据按新推理结果计数；启动要两路佐证或持续的音频证据，维持只要任一路有支持，降低单模态误判造成的误转和动作中误停。启动时还参考音频线索：音频被背景音乐盖住、连续听不出时允许视频单独启动；视频确定是剧情时，对白引起的音频误判不算启动证据。
 - BLE 控制：使用 CoreBluetooth 实现自动扫描、连接、协议帧构建、CRC 校验、状态解析和指令发送。
 - 手动电子菜单：在 App 内直接选择变频模式（1-3）与马达强度（0-10 档），无需在设备上轮询实体按键。
+- 定时加档（在手动电子菜单里打开，默认关闭）：视频分析累计播放满设定时间（1-30 分钟）后，发给设备的档位自动 +1 / +2，模拟临近高潮；0 档仍为停止，最高 10 档。暂停、静音时不计时，退出当前模式或视频播完后重新计时。
 - 本地按键优先：硬件按键可暂停 App 控制，暂停时屏幕底部弹出提示；用户可在手动电子菜单页点「恢复控制」手动恢复（主界面的恢复按钮已隐藏）。
 - 播放同步：支持播放、暂停、Seek、播放结束恢复和横竖屏切换；Seek 后会重置历史状态并重新同步分析链路。
 - 应用更新检查：通过远端版本配置判断推荐更新或强制更新，并跳转 App Store。
@@ -72,6 +73,7 @@ flowchart TB
 | `PcmCircularBuffer.java` | `PcmCircularBuffer.swift` |
 | `FusionArbiter.java` | `FusionArbiter.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐 tick 校验） |
 | `AudioCue.java` | `AudioCue.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐位校验分组分数和线索） |
+| `LevelBoost.java` | `LevelBoost.swift`（逐行移植，`XcupTests/LevelBoostTests` 与 Android `LevelBoostTest` 一一对应） |
 | `AudioInferenceHelper.java` | `AudioInferenceHelper.swift` |
 | Android BLE API | `BluetoothManager.swift` + CoreBluetooth |
 | `synchronized` / 原子变量 | DispatchQueue barrier、同步读取和线程安全结果容器 |
@@ -90,7 +92,8 @@ flowchart TB
 | `AudioCue.swift` | 音频线索：AudioSet 分数按含义分组求和，判对白 / 音乐 / 安静 / 听不出 / 人声 / 拍打 / 其它，交给融合仲裁的启动判断 |
 | `ThreadSafeAnalysisResults.swift` | 在线程之间安全保存和读取分析结果 |
 | `FusionArbiter.swift` | 融合仲裁：根据两路的新推理结果（音频带线索）决定马达的启动、维持与停止，离线模式与在线模式共用 |
-| `ManualControlView.swift` | 手动电子菜单：模式选择、强度滑杆、紧急停止与下发节流 |
+| `LevelBoost.swift` | 定时加档：只累计分析在跑的时间，到点后发给设备的档位加 1 / 2 档（分析档位不变）；设置的键名与读取在 `LevelBoostSettings` |
+| `ManualControlView.swift` | 手动电子菜单：模式选择、强度滑杆、紧急停止与下发节流；定时加档的设置 |
 | `BluetoothManager.swift` | BLE 扫描、连接、协议帧编解码、CRC 校验和状态管理 |
 
 ## 模型规格

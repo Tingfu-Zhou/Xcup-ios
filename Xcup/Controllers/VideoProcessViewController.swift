@@ -235,6 +235,11 @@ class VideoProcessViewController: UIViewController {
     // 最近一次“已发送”的档位（用于判断是否需要用同一动作更新档位）
     private var lastSentLevel: Int = 0
     
+    // [定时加档] 分析累计播放满用户选定的时间后，发给设备的档位再加 1 / 2 档（设置在手动电子菜单，规则见 LevelBoost）。
+    // currentLevel 仍是分析档位，只在发送时加（boostLevel）；lastSentLevel 记的是加档后实际发出去的档位。只在主线程访问。
+    private var levelBoost = LevelBoostSettings.load()   // 进入页面时读一次
+    private var levelBoostNow = 0                        // 此刻加几档（没打开 / 没到点为 0）：融合 tick 里更新，视频播完清零
+
     // ★ 新增：暂停时挂起的蓝牙动作与档位
     private var suspendedBluetoothState: String = ""
     private var suspendedLevel: Int = 0
@@ -620,6 +625,8 @@ class VideoProcessViewController: UIViewController {
 
         if !isAnalysisPaused {
             performFusion()
+        } else {
+            levelBoost.pause(at: monotonicMs())   // [定时加档] 暂停期间不计时
         }
 
         let elapsedNs = DispatchTime.now().uptimeNanoseconds - t0.uptimeNanoseconds
@@ -648,6 +655,7 @@ class VideoProcessViewController: UIViewController {
                 if !(self?.isVideoCompleted ?? true) {
                     self?.isVideoCompleted = true
                     self?.pauseAnalysis()
+                    self?.resetLevelBoost() // [定时加档] 视频播完，从头计时
                     print("🎞️ 视频播完，暂停分析等待用户操作")
                 }
             }
@@ -937,6 +945,8 @@ class VideoProcessViewController: UIViewController {
             audioHz: audioLevelLike, audioConf: audioLevelConf,
             videoHz: .nan, videoConf: 0
         )
+        // [定时加档] 接着计时，算出此刻该加几档（updateBluetoothState 发送时加在分析档位上）
+        updateLevelBoost()
             
         // 更新UI
         if !filteredVideoAction.isEmpty {
@@ -969,6 +979,7 @@ class VideoProcessViewController: UIViewController {
         // 🆕 更新UI, 显示蓝牙实际发送的动作
         if !latestBluetoothAction.isEmpty {
             tvOverlay.text = "Final: \(latestBluetoothAction) | freq: \(finalfreq)"
+                + (levelBoostNow > 0 ? "（加档 +\(levelBoostNow)）" : "")
         } else {
             tvOverlay.text = "Final: 等待识别..."
         }
@@ -1216,18 +1227,20 @@ class VideoProcessViewController: UIViewController {
                 // 切换到 Noise 时，档位置 0
                 levelToSend = 0
             }
+            // [定时加档] 实际发给设备的档位：到点后在分析档位上加档（0 档不加）；没打开 / 没到点时与 levelToSend 相同
+            let boostedLevel = boostLevel(levelToSend)
             
             print(String(format: "[蓝牙] [同步分析] ✅ 发送指令: action=%@, level=%d, 已稳定=%.0fms",
                          pendingBluetoothState,
-                         levelToSend,
+                         boostedLevel,
                          currentTime - pendingStateStartTime))
             
             latestBluetoothAction = pendingBluetoothState
             
             if BluetoothManager.shared.isConnected {
-                BluetoothManager.shared.sendAction(pendingBluetoothState, levelToSend)
+                BluetoothManager.shared.sendAction(pendingBluetoothState, boostedLevel)
                 print("[蓝牙] [同步分析] ✅ 已通过BLE发送指令(动作切换/含档位)")
-                print("[音频节律] ✅ 发送节律：\(levelToSend)")
+                print("[音频节律] ✅ 发送节律：\(boostedLevel)")
             } else {
                 print("[蓝牙] BLE未连接，仅更新UI显示")
             }
@@ -1238,10 +1251,11 @@ class VideoProcessViewController: UIViewController {
             
             // 关键同步：
             // 保证 currentLevel / lastSentLevel / 实际发送档位一致。
+            // [定时加档] currentLevel 记分析档位，lastSentLevel 记实际发出去的（加档后的）档位
             if isSexAction(currentBluetoothState) {
                 currentLevel = levelToSend
                 currentLevelSinceMs = currentTime
-                lastSentLevel = levelToSend
+                lastSentLevel = boostedLevel
             } else {
                 lastSentLevel = 0
             }
@@ -1253,20 +1267,23 @@ class VideoProcessViewController: UIViewController {
         // ===================== 情况 B：动作未变，但档位变化 =====================
         // 例如当前仍然是 do，但档位从 8 降到 4。
         // 由于协议没有单独速度帧，所以重发同一动作并携带新档位。
-        let levelChanged = supportsLevel && (currentLevel != lastSentLevel)
+        // [定时加档] 比较的是发给设备的档位：到点加档时分析档位没变，也会在这里按发送间隔补发一次
+        let boostedLevel = boostLevel(currentLevel)
+        let levelChanged = supportsLevel && (boostedLevel != lastSentLevel)
         let gapOk = (currentTime - lastBluetoothSendTime) >= BLUETOOTH_SEND_INTERVAL
         
-        print(String(format: "[档位发送判断] action=%@, supportsLevel=%@, currentLevel=%d, lastSentLevel=%d, levelChanged=%@, gapOk=%@, gap=%.0fms",
+        print(String(format: "[档位发送判断] action=%@, supportsLevel=%@, currentLevel=%d, boost=%d, lastSentLevel=%d, levelChanged=%@, gapOk=%@, gap=%.0fms",
                      currentBluetoothState,
                      supportsLevel ? "true" : "false",
                      currentLevel,
+                     levelBoostNow,
                      lastSentLevel,
                      levelChanged ? "true" : "false",
                      gapOk ? "true" : "false",
                      currentTime - lastBluetoothSendTime))
         
         if levelChanged && gapOk {
-            let levelToSend = currentLevel
+            let levelToSend = boostedLevel
             
             print(String(format: "[蓝牙] 同动作更新档位：%@ -> level=%d",
                          currentBluetoothState,
@@ -1307,6 +1324,26 @@ class VideoProcessViewController: UIViewController {
     private func currentStateSupportsSpeed() -> Bool {
         let lower = currentBluetoothState.lowercased()
         return lower.hasPrefix("do") || lower.hasPrefix("oral")
+    }
+
+    // ===================== [定时加档] =====================
+
+    /// [定时加档] 融合循环在跑：接着计时，更新此刻该加几档。计时用单调时钟，改系统时间不影响
+    private func updateLevelBoost() {
+        let now = monotonicMs()
+        levelBoost.resume(at: now)
+        levelBoostNow = levelBoost.boost(at: now)
+    }
+
+    /// [定时加档] 视频播完：从头计时，之后发出去的档位不再加
+    private func resetLevelBoost() {
+        levelBoost.reset()
+        levelBoostNow = 0
+    }
+
+    /// [定时加档] 分析档位 → 发给设备的档位：到点后加 levelBoostNow 档（0 档不加，最高 BluetoothManager.LEVEL_MAX）
+    private func boostLevel(_ level: Int) -> Int {
+        return LevelBoost.apply(level: level, boost: levelBoostNow, maxLevel: Int(BluetoothManager.LEVEL_MAX))
     }
 
 
@@ -1467,10 +1504,12 @@ class VideoProcessViewController: UIViewController {
             currentLevelSinceMs = Date().timeIntervalSince1970 * 1000
 
             if BluetoothManager.shared.isConnected && !BluetoothManager.shared.isPausedByLocal {
-                BluetoothManager.shared.sendAction(suspendedBluetoothState, suspendedLevel)
+                // [定时加档] 暂停不清零计时：已经到点的，恢复后接着按加档后的档位转
+                let boostedLevel = boostLevel(suspendedLevel)
+                BluetoothManager.shared.sendAction(suspendedBluetoothState, boostedLevel)
                 lastBluetoothSendTime = Date().timeIntervalSince1970 * 1000
-                lastSentLevel = suspendedLevel
-                print("[恢复] 已发送恢复动作: \(suspendedBluetoothState) 档位: \(suspendedLevel)")
+                lastSentLevel = boostedLevel
+                print("[恢复] 已发送恢复动作: \(suspendedBluetoothState) 档位: \(boostedLevel)")
             }
 
             suspendedBluetoothState = ""
@@ -1489,6 +1528,7 @@ class VideoProcessViewController: UIViewController {
         }
         isVideoCompleted = true
         pauseAnalysis()
+        resetLevelBoost() // [定时加档] 视频播完，从头计时
 
         // 视频节律已移除：
         // videoRhythmEstimator?.reset()

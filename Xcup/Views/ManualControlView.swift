@@ -13,6 +13,9 @@
 //  变频模式的选择同时作用于视频分析模式：分析链路只决定「转 / 不转」与强度档位，
 //  「怎么转」以本页面的选择为准，两边共用 BluetoothManager.patternDefaultsKey 这一份存储。
 //
+//  「定时加档」（默认关闭）也在本页设置：视频分析累计播放满选定的时间后，分析给出的档位自动加 1 / 2 档。
+//  只存进 UserDefaults、不下发任何指令，离线视频 / 在线录屏进入时用 LevelBoostSettings.load() 读一次（规则见 LevelBoost）。
+//
 
 import SwiftUI
 import UIKit
@@ -43,6 +46,9 @@ struct ManualControlView: View {
 
     private static let patternIds: [UInt8] = Array(BluetoothManager.PATTERN_MIN...BluetoothManager.PATTERN_MAX)
 
+    /// 定时加档的幅度选项：+1 档、+2 档
+    private static let boostLevelOptions: [Int] = Array(LevelBoost.minLevels...LevelBoost.maxLevels)
+
     // MARK: - 状态
 
     @Environment(\.dismiss) private var dismiss
@@ -56,6 +62,11 @@ struct ManualControlView: View {
     @State private var observerToken: UUID?
     @State private var lastSendTime: TimeInterval = 0
     @State private var pendingSend: DispatchWorkItem?
+
+    // 定时加档的设置（视频分析模式用）：改动立即写进 UserDefaults，键名见 LevelBoostSettings
+    @State private var boostEnabled  = false
+    @State private var boostDelayMin = LevelBoost.defaultDelayMin
+    @State private var boostLevels   = LevelBoost.defaultLevels
 
     /// 未连接或处于本地按键锁定时，模式/强度控件置灰（紧急停止只要连接就可用）
     private var controlsDisabled: Bool { !isConnected || isPausedByLocal }
@@ -85,6 +96,9 @@ struct ManualControlView: View {
                     .disabled(!isConnected)
 
                     statusFooter
+
+                    boostSection
+                        .padding(.top, 12)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
@@ -310,6 +324,169 @@ struct ManualControlView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // MARK: - 定时加档（视频分析模式的设置）
+    // 改动立即写进 UserDefaults，不下发任何指令，所以不跟着蓝牙连接 / 本地按键锁定置灰。
+    // 离线视频 / 在线录屏进入时读一次，在这里改了下次进入生效。
+
+    private var boostSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("定时加档")
+                    .font(MD3Typography.titleMedium)
+                    .foregroundColor(.md3OnSurface)
+
+                HStack(spacing: 12) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.md3OnTertiaryContainer)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(Color.md3TertiaryContainer))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("播放一段时间后自动加档")
+                            .font(MD3Typography.titleMedium)
+                            .foregroundColor(.md3OnSurface)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("模拟临近高潮 · 只作用于视频分析模式")
+                            .font(MD3Typography.bodySmall)
+                            .foregroundColor(.md3OnSurfaceVariant)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Toggle("播放一段时间后自动加档", isOn: boostEnabledBinding)
+                        .labelsHidden()
+                        .tint(.md3Primary)
+                }
+
+                // 开关打开才显示时间和幅度
+                if boostEnabled {
+                    boostSettings
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.md3Surface)
+            )
+
+            Text("适用于离线视频和在线录屏模式。暂停或没有声音时不计时；退出当前模式、视频播放完毕后重新计时（在线模式无法得知视频何时播完，连续静音约 10 秒即视为播完）。")
+                .font(MD3Typography.bodySmall)
+                .foregroundColor(.md3OnSurfaceVariant)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var boostSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("开始加档")
+                    .font(MD3Typography.titleMedium)
+                    .foregroundColor(.md3OnSurface)
+                Spacer()
+                Text("\(boostDelayMin) 分钟后")
+                    .font(MD3Typography.titleMedium)
+                    .foregroundColor(.md3Primary)
+            }
+            .padding(.top, 8)
+
+            // 范围与 LevelBoost.minDelayMin / maxDelayMin 一致
+            Slider(
+                value: boostDelayBinding,
+                in: Double(LevelBoost.minDelayMin)...Double(LevelBoost.maxDelayMin),
+                step: 1
+            )
+            .tint(.md3Primary)
+            .accessibilityLabel(Text("开始加档"))
+
+            HStack {
+                Text("\(LevelBoost.minDelayMin) 分钟")
+                Spacer()
+                Text("\(LevelBoost.maxDelayMin) 分钟")
+            }
+            .font(MD3Typography.bodySmall)
+            .foregroundColor(.md3OnSurfaceVariant)
+
+            Text("加档幅度")
+                .font(MD3Typography.titleMedium)
+                .foregroundColor(.md3OnSurface)
+                .padding(.top, 8)
+
+            // 分段按钮，样式同「变频模式」
+            HStack(spacing: 0) {
+                ForEach(Self.boostLevelOptions, id: \.self) { levels in
+                    if levels != LevelBoost.minLevels {
+                        Rectangle()
+                            .fill(Color.md3Outline)
+                            .frame(width: 1)
+                    }
+                    boostLevelsSegment(levels)
+                }
+            }
+            .frame(height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: MD3Shape.buttonCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MD3Shape.buttonCornerRadius, style: .continuous)
+                    .stroke(Color.md3Outline, lineWidth: 1)
+            )
+
+            Text("累计播放满 \(boostDelayMin) 分钟后，视频分析给出的档位自动加 \(boostLevels) 档（0 档仍为停止，最高 10 档）。")
+                .font(MD3Typography.bodySmall)
+                .foregroundColor(.md3OnSurfaceVariant)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func boostLevelsSegment(_ levels: Int) -> some View {
+        let selected = (boostLevels == levels)
+        let fg: Color = selected ? .md3OnSecondaryContainer : .md3OnSurfaceVariant
+        let bg: Color = selected ? .md3SecondaryContainer : .clear
+
+        return Button(action: { selectBoostLevels(levels) }) {
+            HStack(spacing: 4) {
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                Text("+\(levels) 档")
+                    .font(MD3Typography.titleMedium)
+            }
+            .foregroundColor(fg)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(bg)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var boostEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { self.boostEnabled },
+            set: { isOn in
+                self.boostEnabled = isOn
+                UserDefaults.standard.set(isOn, forKey: LevelBoostSettings.enabledKey)
+            }
+        )
+    }
+
+    /// 滑杆的值是 Double：取整到分钟、钳到范围内再存
+    private var boostDelayBinding: Binding<Double> {
+        Binding(
+            get: { Double(self.boostDelayMin) },
+            set: { newValue in
+                let minutes = LevelBoost.clampDelayMin(Int(newValue.rounded()))
+                guard minutes != self.boostDelayMin else { return }
+                self.boostDelayMin = minutes
+                UserDefaults.standard.set(minutes, forKey: LevelBoostSettings.delayMinKey)
+            }
+        )
+    }
+
+    private func selectBoostLevels(_ levels: Int) {
+        guard levels != boostLevels else { return }
+        boostLevels = levels
+        UserDefaults.standard.set(levels, forKey: LevelBoostSettings.levelsKey)
+    }
+
     // MARK: - 生命周期
 
     private func handleAppear() {
@@ -320,6 +497,11 @@ struct ManualControlView: View {
         BluetoothManager.shared.setAnalysisPattern(patternId)
         // 强度一律从 0 开始，避免一进页面就意外启动
         level = 0
+
+        // 定时加档：没存过为默认值（关闭、10 分钟、+1 档），存储里的值先钳到范围内
+        boostEnabled  = LevelBoostSettings.enabled()
+        boostDelayMin = LevelBoostSettings.delayMin()
+        boostLevels   = LevelBoostSettings.levels()
 
         isConnected     = BluetoothManager.shared.isConnected
         isPausedByLocal = BluetoothManager.shared.isPausedByLocal

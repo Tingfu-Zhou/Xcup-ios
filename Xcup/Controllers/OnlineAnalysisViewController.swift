@@ -139,6 +139,10 @@ class OnlineAnalysisViewController: UIViewController {
     private var pendingLevel:        Int? = nil
     private var pendingLevelSinceMs: TimeInterval = 0
     private var lastSentLevel:       Int = 0
+    // [定时加档] 分析累计播放满用户选定的时间后，发给设备的档位再加 1 / 2 档（设置在手动电子菜单，规则见 LevelBoost）。
+    // currentLevel 仍是分析档位，只在发送时加（boostLevel）；lastSentLevel 记的是加档后实际发出去的档位。只在主线程访问。
+    private var levelBoost           = LevelBoostSettings.load()   // 进入页面时读一次；每次开始广播重新读（handleBroadcastStarted）
+    private var levelBoostNow:       Int = 0                       // 此刻加几档（没打开 / 没到点为 0）：融合 tick 里更新，长时间静音时清零
     private let LEVEL_STABLE_MS:     TimeInterval = 0
     private let LEVEL_MIN_DUR_MS:    TimeInterval = 0
     private let LEVEL_SEND_GAP_MS:   TimeInterval = 1600
@@ -153,6 +157,9 @@ class OnlineAnalysisViewController: UIViewController {
     private let SILENCE_THRESHOLD_SEC:    TimeInterval = 5.0
     private var consecutiveSilentFrames   = 0
     private let MIN_SILENT_FRAMES         = 10
+    // [定时加档] 静音暂停后再过这么久仍没有声音（连续静音约 10 秒），就当这个视频播完了，从头计时。
+    // 对应 Android 静音暂停 5 秒后清空分析缓冲（resetAnalysisBuffers）的时机；iOS 没有那一步，单独计这一项
+    private let LEVEL_BOOST_SILENCE_RESET_SEC: TimeInterval = 5.0
 
     // VAD（子窗口 + RMS/Peak dBFS + 迟滞）
     // samples 已是 mono Float32 / [-1,1]，dBFS 公式直接对归一化值取 20*log10
@@ -574,6 +581,9 @@ class OnlineAnalysisViewController: UIViewController {
         }
         // 🆕 [融合仲裁] 同一个页面里可以停止再重新开始广播：上一次广播的证据不能带进这一次
         fusionArbiter.reset(FusionArbiter.nowMs())
+        // [定时加档] 重新开始广播相当于重新进入在线模式（Android 停止录屏就退出页面）：重新读设置、从头计时
+        levelBoost = LevelBoostSettings.load()
+        levelBoostNow = 0
         startAnalysisLoops()
         print("[在线模式] 广播已开始，IPC读端=\(ipcOk ? "就绪" : "失败（检查App Groups配置）")")
     }
@@ -822,7 +832,11 @@ class OnlineAnalysisViewController: UIViewController {
     }
     private func runFusionTick() {
         let t0 = DispatchTime.now()
-        if !isAnalysisPaused { performFusion() }
+        if !isAnalysisPaused {
+            performFusion()
+        } else {
+            levelBoost.pause(at: monotonicMs())   // [定时加档] 静音暂停期间不计时
+        }
         let elapsed = Int64((DispatchTime.now().uptimeNanoseconds - t0.uptimeNanoseconds) / 1_000_000)
         scheduleFusionTick(afterMs: max(0, FUSION_INTERVAL_MS - elapsed))
     }
@@ -1012,6 +1026,8 @@ class OnlineAnalysisViewController: UIViewController {
         // if aAction == "oral" { aAction = "do" }
 
         let finalFreq   = computeFinalFreq(audioHz: aLevel, audioConf: aLConf, videoHz: .nan, videoConf: 0)
+        // [定时加档] 接着计时，算出此刻该加几档（updateBluetoothState 发送时加在分析档位上）
+        updateLevelBoost()
 
         // 🆕 融合仲裁：启动 / 维持 / 停止分开判断，证据按"新推理结果"计数（按产出时刻去重）。
         // 过期结果的产出时刻照样传进去，账本自己去重 / 丢弃；motorOn 必须在 updateBluetoothState 之前取。
@@ -1027,6 +1043,7 @@ class OnlineAnalysisViewController: UIViewController {
         tvOverlay.text = latestBluetoothAction.isEmpty
             ? "Final: 等待识别..."
             : "Final: \(latestBluetoothAction) | freq: \(finalFreq)"
+                + (levelBoostNow > 0 ? "（加档 +\(levelBoostNow)）" : "")
     }
 
     // MARK: - 暂停 / 恢复
@@ -1056,6 +1073,13 @@ class OnlineAnalysisViewController: UIViewController {
             }
             // 原来这里清空投票历史（对应 Android 静音 5 秒后的 resetAnalysisBuffers），投票窗已删除。
             // 暂停期间融合循环不调 decide，融合仲裁的证据在恢复时统一清空（resumeAnalysis）
+
+            // [定时加档] 在线模式看不到视频什么时候播完：静音暂停后再过 5 秒仍没恢复，就当这个视频播完了，从头计时。
+            // 中途有声音会先恢复分析，而再次静音暂停又要 5 秒以上，所以到时仍是暂停，就说明这段时间一直没声音
+            DispatchQueue.main.asyncAfter(deadline: .now() + self.LEVEL_BOOST_SILENCE_RESET_SEC) { [weak self] in
+                guard let self, self.isAnalysisPaused else { return }
+                self.resetLevelBoost()
+            }
         }
         // refreshDiagIfNeeded()
     }
@@ -1315,18 +1339,20 @@ class OnlineAnalysisViewController: UIViewController {
                 // 切换到 Noise 时，档位置 0
                 levelToSend = 0
             }
+            // [定时加档] 实际发给设备的档位：到点后在分析档位上加档（0 档不加）；没打开 / 没到点时与 levelToSend 相同
+            let boostedLevel = boostLevel(levelToSend)
             
             print(String(format: "[蓝牙] [同步分析] ✅ 发送指令: action=%@, level=%d, 已稳定=%.0fms",
                          pendingBluetoothState,
-                         levelToSend,
+                         boostedLevel,
                          currentTime - pendingStateStartTime))
             
             latestBluetoothAction = pendingBluetoothState
             
             if BluetoothManager.shared.isConnected {
-                BluetoothManager.shared.sendAction(pendingBluetoothState, levelToSend)
+                BluetoothManager.shared.sendAction(pendingBluetoothState, boostedLevel)
                 print("[蓝牙] [同步分析] ✅ 已通过BLE发送指令(动作切换/含档位)")
-                print("[音频节律] ✅ 发送节律：\(levelToSend)")
+                print("[音频节律] ✅ 发送节律：\(boostedLevel)")
             } else {
                 print("[蓝牙] BLE未连接，仅更新UI显示")
             }
@@ -1337,10 +1363,11 @@ class OnlineAnalysisViewController: UIViewController {
             
             // 关键同步：
             // 保证 currentLevel / lastSentLevel / 实际发送档位一致。
+            // [定时加档] currentLevel 记分析档位，lastSentLevel 记实际发出去的（加档后的）档位
             if isSexAction(currentBluetoothState) {
                 currentLevel = levelToSend
                 currentLevelSinceMs = currentTime
-                lastSentLevel = levelToSend
+                lastSentLevel = boostedLevel
             } else {
                 lastSentLevel = 0
             }
@@ -1352,20 +1379,23 @@ class OnlineAnalysisViewController: UIViewController {
         // ===================== 情况 B：动作未变，但档位变化 =====================
         // 例如当前仍然是 do，但档位从 8 降到 4。
         // 由于协议没有单独速度帧，所以重发同一动作并携带新档位。
-        let levelChanged = supportsLevel && (currentLevel != lastSentLevel)
+        // [定时加档] 比较的是发给设备的档位：到点加档时分析档位没变，也会在这里按发送间隔补发一次
+        let boostedLevel = boostLevel(currentLevel)
+        let levelChanged = supportsLevel && (boostedLevel != lastSentLevel)
         let gapOk = (currentTime - lastBluetoothSendTime) >= BLUETOOTH_SEND_INTERVAL
         
-        print(String(format: "[档位发送判断] action=%@, supportsLevel=%@, currentLevel=%d, lastSentLevel=%d, levelChanged=%@, gapOk=%@, gap=%.0fms",
+        print(String(format: "[档位发送判断] action=%@, supportsLevel=%@, currentLevel=%d, boost=%d, lastSentLevel=%d, levelChanged=%@, gapOk=%@, gap=%.0fms",
                      currentBluetoothState,
                      supportsLevel ? "true" : "false",
                      currentLevel,
+                     levelBoostNow,
                      lastSentLevel,
                      levelChanged ? "true" : "false",
                      gapOk ? "true" : "false",
                      currentTime - lastBluetoothSendTime))
         
         if levelChanged && gapOk {
-            let levelToSend = currentLevel
+            let levelToSend = boostedLevel
             
             print(String(format: "[蓝牙] 同动作更新档位：%@ -> level=%d",
                          currentBluetoothState,
@@ -1406,5 +1436,25 @@ class OnlineAnalysisViewController: UIViewController {
     private func currentStateSupportsSpeed() -> Bool {
         let lower = currentBluetoothState.lowercased()
         return lower.hasPrefix("do") || lower.hasPrefix("oral")
+    }
+
+    // ===================== [定时加档] =====================
+
+    /// [定时加档] 融合循环在跑：接着计时，更新此刻该加几档。计时用单调时钟，改系统时间不影响
+    private func updateLevelBoost() {
+        let now = monotonicMs()
+        levelBoost.resume(at: now)
+        levelBoostNow = levelBoost.boost(at: now)
+    }
+
+    /// [定时加档] 长时间静音（当作视频播完）：从头计时，之后发出去的档位不再加
+    private func resetLevelBoost() {
+        levelBoost.reset()
+        levelBoostNow = 0
+    }
+
+    /// [定时加档] 分析档位 → 发给设备的档位：到点后加 levelBoostNow 档（0 档不加，最高 BluetoothManager.LEVEL_MAX）
+    private func boostLevel(_ level: Int) -> Int {
+        return LevelBoost.apply(level: level, boost: levelBoostNow, maxLevel: Int(BluetoothManager.LEVEL_MAX))
     }
 }
