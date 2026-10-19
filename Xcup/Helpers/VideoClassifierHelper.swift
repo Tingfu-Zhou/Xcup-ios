@@ -54,16 +54,18 @@ final class VideoClassifierHelper {
         }
     }
 
-    /// 任意尺寸的画面 → 模型输入（160×160 ARGB）：按 FramePreprocessor 居中裁正方形、面积平均缩小，与训练一致。
-    /// 在线模式（截屏）用它；离线模式在 VideoFrameExtractor 里已经处理好了。对应 Android 的 toModelBitmap()。
+    /// 截屏（任意尺寸）→ ARGB 像素，写进 scratch 的前 宽×高 个（行优先，一行 image.width 个）。在线模式用：
+    /// 之后 ScreenCropper 在里面找视频画面，FramePreprocessor 再居中裁正方形、面积平均缩到 160（对应 Android
+    /// OnlineAnalysisActivity 先 getPixels、再 toModelBitmap(px, w, h, region)）。离线模式在 VideoFrameExtractor 里处理。
     ///
     /// 2026-10-15 之前是 resizeTo160：整张图直接画进 160×160（压扁），而且走 UIGraphicsImageRenderer / CGContext，
     /// 颜色还可能被转换（广色域屏幕上默认是扩展色彩空间）。
     ///
     /// - Parameter scratch: 可复用的像素缓冲（不够大时重新分配），避免每帧分配几 MB
-    static func toModelInput(_ image: CGImage, scratch: inout [UInt32]) -> [UInt32]? {
+    /// - Returns: 画不出来时 false
+    static func drawPixels(_ image: CGImage, into scratch: inout [UInt32]) -> Bool {
         let w = image.width, h = image.height
-        guard w > 0, h > 0, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        guard w > 0, h > 0, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return false }
         if scratch.count < w * h {
             scratch = [UInt32](repeating: 0, count: w * h)
         }
@@ -77,8 +79,7 @@ final class VideoClassifierHelper {
             ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
             return true
         }
-        guard drawn else { return nil }
-        return FramePreprocessor.toModelInput(scratch, w: w, h: h, region: FramePreprocessor.cropRect(w: w, h: h))
+        return drawn
     }
 
     /// 12 帧 → 模型输入张量 [1, 12, 160, 160, 3]：t → h → w → c，R、G、B 顺序，0–255 原值（不除以 255、不减均值）。

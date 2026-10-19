@@ -2,7 +2,7 @@
 //  FramePreprocessor.swift
 //  Xcup
 //
-//  逐行移植自 Android FramePreprocessor.java（xcup-android c326083，2026-10-14），两端由
+//  逐行移植自 Android FramePreprocessor.java（xcup-android c326083，2026-10-14；cropRect(in:) 对应 f750061），两端由
 //  XcupTests/FramePreprocessorTests.swift 用同一份 preprocess_golden.txt 对拍，喂给视频模型的画面逐像素一致。
 //  改算法必须三处同步：Android FramePreprocessor.java、bench/tools/video_rescore.py、这里；改完在 Android 仓库跑
 //  python3 bench/tools/video_rescore.py golden 重新生成对拍数据，换掉 XcupTests/preprocess_golden.txt。
@@ -21,7 +21,8 @@ import Foundation
 ///
 /// 2026-10-15 之前 iOS 是把整帧压扁成 160×160：离线模式 AVAssetImageGenerator 先按宽高比缩进 160×160（16:9 → 160×90），
 /// 再拉伸成 160×160（训练时裁掉的左右两边也送进了模型，竖直方向只剩 90 行）；在线模式整屏直接压扁。现在两种模式都走这里：
-/// 1. 按 `cropRect` 居中裁正方形（离线模式在 VideoFrameExtractor 里裁好、用 vImage 缩到 672×672，在线模式在这里裁）；
+/// 1. 按 `cropRect` 居中裁正方形（离线模式在 VideoFrameExtractor 里裁好、用 vImage 缩到 672×672，在线模式在这里裁；
+///    在线模式先用 ScreenCropper 去掉截屏里视频四周的黑边，再在视频画面里居中裁，见 `cropRect(in:)`）；
 /// 2. 面积平均缩到 224（训练片段的尺寸）；
 /// 3. 面积平均缩到 160（与训练读帧时的 cv2.INTER_AREA 同一套权重）。
 ///
@@ -56,6 +57,12 @@ enum FramePreprocessor {
         if !centerCrop { return Region(x0: 0, y0: 0, w: w, h: h) }
         let side = min(w, h)
         return Region(x0: (w - side) / 2, y0: (h - side) / 2, w: side, h: side)
+    }
+
+    /// region 里的居中正方形（在线模式：ScreenCropper 找出的视频画面里再居中裁）。
+    static func cropRect(in region: Region) -> Region {
+        let r = cropRect(w: region.w, h: region.h)
+        return Region(x0: region.x0 + r.x0, y0: region.y0 + r.y0, w: r.w, h: r.h)
     }
 
     /// CPU 阶段：取 region 区域 → 缩到 224×224 → 缩到 160×160。

@@ -7,10 +7,10 @@
 //  数据流：
 //    [XcupBroadcast Extension]
 //        ├─ audioApp（全系统音频混音）→ AudioRingWriter → App Group 共享文件
-//        └─ video（屏幕画面 JPEG）   → VideoFrameWriter → App Group 共享文件
+//        └─ video（转正的屏幕画面 JPEG + 方向）→ VideoWriter → App Group 共享文件
 //    [主 App]
 //        ├─ AudioRingReader → processAudio() → 音频分析 Loop
-//        └─ VideoFrameReader → processVideo() → 视频分析 Loop
+//        └─ VideoFrameReader → 去黑边（ScreenCropper）→ 视频画面的居中正方形（FramePreprocessor）→ 视频分析 Loop
 //
 //  注意：两端均需开启 App Groups 能力，且 Group ID = group.com.aibei.Xcup
 //
@@ -57,7 +57,7 @@ class OnlineAnalysisViewController: UIViewController {
     // MARK: - 帧节流
     private var lastFrameProcessTime: TimeInterval = 0
     private let FRAME_INTERVAL: TimeInterval = 0.1
-    private var latestFrame: UIImage?
+    private var latestFrame: (image: UIImage, info: SharedVideoFrame)?   // 扩展最新的一帧和它的方向，视频分析取走后置空
     private let frameLock = NSLock()
 
     // MARK: - 预览（只管显示，不影响送进模型的画面）
@@ -97,6 +97,25 @@ class OnlineAnalysisViewController: UIViewController {
     private var frameBuffer: [[UInt32]] = []
     private var screenPixels: [UInt32] = []
     private var lastVideoInferenceMs: Int64 = 0
+    // [去黑边] 在截屏里找出视频画面（ScreenCropper），再与训练一样取居中正方形。以下几个也只在视频分析队列用
+    private let screenCropper = ScreenCropper()
+    private var lastVideoRegion: FramePreprocessor.Region?   // 上一次找到的视频画面（变了才打日志）
+    private var screenGeometry: ScreenGeometry?              // 帧窗口里截屏的布局：转屏后变了，窗口里的旧帧作废
+    private var geometrySettleUntilMs: Int64 = 0             // 转屏后这个时刻（monotonicMs）之前的帧不用
+    private let GEOMETRY_SETTLE_MS: Int64 = 500              // 转屏动画里录到的是转到一半的画面，等它转完
+    #if DEBUG
+    private let inputDumper = ModelInputDumper(name: "online")   // 验收用：定时把送进模型的 160×160 存成 PNG
+    #endif
+
+    /// 截屏的布局：转正后的宽高 + ReplayKit 给的方向。变了就是转屏（包括尺寸不变的 180° 翻转）
+    private struct ScreenGeometry: Equatable, CustomStringConvertible {
+        let width: Int
+        let height: Int
+        let orientation: UInt32
+        var description: String {
+            "\(width)x\(height) 方向 \(orientation)(\(SharedVideoFrame.orientationName(orientation)))"
+        }
+    }
 
     // MARK: - 分组概率阈值（与 VideoProcessViewController 一致：在归并后的分组概率上判定）
     private let VIDEO_DO_PROB_THRESHOLD:    Float = 0.65  // P(oral)+P(sex) ≥ 0.65 → "do"
@@ -615,11 +634,11 @@ class OnlineAnalysisViewController: UIViewController {
         guard now - lastFrameProcessTime >= FRAME_INTERVAL else { return }
         lastFrameProcessTime = now
 
-        guard let jpeg = videoReader.readLatestJpeg(),
-              let image = UIImage(data: jpeg) else { return }
+        guard let shared = videoReader.readLatest(),
+              let image = UIImage(data: shared.jpeg) else { return }
 
         frameLock.lock()
-        latestFrame = image
+        latestFrame = (image, shared)
         frameLock.unlock()
 
         // videoFramesReceived += 1
@@ -771,10 +790,7 @@ class OnlineAnalysisViewController: UIViewController {
         // videoFramesReceived = 0
 
         // 清空视频分类窗口
-        videoAnalysisQueue.async { [weak self] in
-            self?.frameBuffer.removeAll()
-            self?.lastVideoInferenceMs = 0
-        }
+        resetScreenFrames("广播停止")
 
         // 重新显示启动覆盖层
         startOverlay.isHidden = false
@@ -843,41 +859,82 @@ class OnlineAnalysisViewController: UIViewController {
 
     // MARK: - 视频分析
     //
-    // 每 250ms 一轮：取一帧 → 居中裁正方形、缩到 160×160 → 推入环形缓冲（最多 12 帧 = 3 秒窗口）
+    // 每 250ms 一轮：取一帧（扩展已转正）→ 去掉视频四周的黑边（ScreenCropper）→ 视频画面的居中正方形、缩到 160×160
+    // → 推入环形缓冲（最多 12 帧 = 3 秒窗口）。截屏的方向 / 尺寸变了（转屏）先清空窗口
     //   若 缓冲 < 12 帧：return（预热）
     //   若 now - lastVideoInferenceMs < 500ms：return
     //   否则：classifier.predict(12帧) → 分组概率决策
     private func performVideoAnalysis() {
         frameLock.lock()
-        let frame = latestFrame
+        let latest = latestFrame
         latestFrame = nil
         frameLock.unlock()
-        guard let frame = frame else { return }
-
-        // 1. 与训练一致：居中裁正方形 → 面积平均缩到 224 → 160（FramePreprocessor，对应 Android OnlineAnalysisActivity）。
-        //    2026-10-15 之前是整屏直接压扁成 160×160：竖屏看横屏视频时画面只占中间一条，压扁后几乎看不清；居中裁剪至少
-        //    保住中间那块（更好的做法是找出视频画面所在的区域、只裁那块，Android 也还没做）。截屏在广播扩展里已经转正
-        guard let cg = frame.cgImage,
-              let frame160 = VideoClassifierHelper.toModelInput(cg, scratch: &screenPixels) else {
+        guard let latest = latest else { return }
+        guard let cg = latest.image.cgImage else {
             print("❌ [在线-视频] 帧预处理失败")
             return
         }
+        let w = cg.width, h = cg.height
 
-        // 2. 推入环形缓冲（最多 12 帧）
+        // 1. 截屏的方向或尺寸变了（转屏，包括尺寸不变的 180° 翻转）：窗口里的旧帧是另一种画面布局，作废重攒；
+        //    ScreenCropper 记的范围也作废（对应 Android 截图尺寸变了清空帧窗口）。转屏动画里录到的是转到一半的画面，
+        //    GEOMETRY_SETTLE_MS 之内的帧不用（对应 Android 换截图尺寸后丢掉 300ms 的帧）：转到一半的画面四周也是对称的
+        //    黑角，被当成视频画面记下来，之后就一直沿用这个偏大的范围
+        let geometry = ScreenGeometry(width: w, height: h, orientation: latest.info.orientation)
+        if geometry != screenGeometry {
+            let source = "ReplayKit 原始画面 \(latest.info.sourceWidth)x\(latest.info.sourceHeight) "
+                + SharedVideoFrame.fourCC(latest.info.pixelFormat)
+                + "；扩展记的格式：" + (UserDefaults(suiteName: kBroadcastAppGroupID)?.string(forKey: kDiagVideoFmt) ?? "-")
+            if let old = screenGeometry {
+                geometrySettleUntilMs = monotonicMs() + GEOMETRY_SETTLE_MS
+                print("🔄 [在线-视频] 截屏 \(old) → \(geometry)：清空帧窗口，黑边从头找，\(GEOMETRY_SETTLE_MS)ms 后再取帧（\(source)）")
+            } else {
+                print("🔄 [在线-视频] 截屏 \(geometry)（\(source)）")
+            }
+            screenGeometry = geometry
+            frameBuffer.removeAll()
+            screenCropper.reset()
+            lastVideoRegion = nil
+        }
+        if monotonicMs() < geometrySettleUntilMs { return }
+
+        // 2. 与训练一致：先去掉截屏里视频四周的黑边（ScreenCropper），再取视频画面的居中正方形、面积平均缩到 224 → 160
+        //    （FramePreprocessor），对应 Android OnlineAnalysisActivity。2026-10-15 之前是整屏直接压扁成 160×160；
+        //    2026-10-19 之前取的是整个截屏的居中正方形：竖屏全屏播放时视频只是屏幕中间的一条，居中正方形里四成多是黑边
+        guard VideoClassifierHelper.drawPixels(cg, into: &screenPixels) else {
+            print("❌ [在线-视频] 帧预处理失败")
+            return
+        }
+        let video = ScreenCropper.enabled ? screenCropper.update(screenPixels, w: w, h: h)
+                                          : FramePreprocessor.Region(x0: 0, y0: 0, w: w, h: h)
+        let videoMoved = video != lastVideoRegion
+        if videoMoved {
+            print("📐 [在线-视频] 截屏 \(w)x\(h) 里的视频画面：(\(video.x0), \(video.y0)) \(video.w)x\(video.h)")
+            lastVideoRegion = video
+        }
+        let frame160 = FramePreprocessor.toModelInput(screenPixels, w: w, h: h,
+                                                      region: FramePreprocessor.cropRect(in: video))
+        #if DEBUG
+        // 验收用（iOS 在线模式检查清单 6.2）：应当是转正的、视频画面的居中正方形，没有黑边、没有压扁
+        inputDumper.dumpIfDue(frame160, note: "\(w)x\(h)_o\(latest.info.orientation)"
+                                  + "_v\(video.x0)-\(video.y0)-\(video.w)x\(video.h)", force: videoMoved)
+        #endif
+
+        // 3. 推入环形缓冲（最多 12 帧）
         frameBuffer.append(frame160)
         if frameBuffer.count > FRAME_BUFFER_SIZE {
             frameBuffer.removeFirst(frameBuffer.count - FRAME_BUFFER_SIZE)
         }
 
-        // 3. 预热不足
+        // 4. 预热不足
         if frameBuffer.count < FRAME_BUFFER_SIZE { return }
 
-        // 4. 推理步长门控（500ms）
+        // 5. 推理步长门控（500ms）
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         if nowMs - lastVideoInferenceMs < VIDEO_INFER_STEP_MS { return }
         lastVideoInferenceMs = nowMs
 
-        // 5. 推理
+        // 6. 推理
         let inferStart = Date()
         guard let result = videoClassifier.predict(frames: frameBuffer) else {
             print("❌ [在线-视频] MobileNetV3 推理失败")
@@ -886,7 +943,7 @@ class OnlineAnalysisViewController: UIViewController {
         let inferMs = Date().timeIntervalSince(inferStart) * 1000
         let probs = result.probs
 
-        // 6. 分组概率决策（类目顺序 [plot, oral, sex]）
+        // 7. 分组概率决策（类目顺序 [plot, oral, sex]）
         //    pDo = P(oral)+P(sex)，pPlot = P(plot)
         //    判定顺序固定：先 do、后 Noise、否则 unclear；置信度取分组后的概率
         let action: String
@@ -1079,6 +1136,8 @@ class OnlineAnalysisViewController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + self.LEVEL_BOOST_SILENCE_RESET_SEC) { [weak self] in
                 guard let self, self.isAnalysisPaused else { return }
                 self.resetLevelBoost()
+                // [去黑边] 静音这么久，多半换了视频或应用：帧窗口清空、黑边从头找（Android 这时 resetAnalysisBuffers）
+                self.resetScreenFrames("静音约 10 秒")
             }
         }
         // refreshDiagIfNeeded()
@@ -1091,6 +1150,21 @@ class OnlineAnalysisViewController: UIViewController {
             self?.fusionArbiter.reset(FusionArbiter.nowMs(), warmupMs: FusionArbiter.silenceResumeWarmupMs)
         }
         // refreshDiagIfNeeded()
+    }
+
+    /// 清空 12 帧窗口，截屏的布局和黑边都从头找（在视频分析队列上做）。广播停止、长时间静音时调用（对应 Android
+    /// resetAnalysisBuffers 里视频的部分）；转屏在 performVideoAnalysis 里自己处理。
+    private func resetScreenFrames(_ reason: String) {
+        videoAnalysisQueue.async { [weak self] in
+            guard let self else { return }
+            self.frameBuffer.removeAll()
+            self.lastVideoInferenceMs = 0
+            self.screenCropper.reset()
+            self.screenGeometry = nil
+            self.lastVideoRegion = nil
+            self.geometrySettleUntilMs = 0
+            print("[在线-视频] \(reason)：清空帧窗口，黑边从头找")
+        }
     }
 
     /// 已在主线程就直接执行，否则切到主线程（Darwin 通知回调所在的线程不确定）

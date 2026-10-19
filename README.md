@@ -69,6 +69,8 @@ flowchart TB
 | MediaExtractor + MediaCodec（音频解码） | AVAssetReader + AVAssetReaderTrackOutput |
 | `VideoFrameExtractor.java` + `EGLRenderer.java`（抽帧） | `VideoFrameExtractor.swift`：AVPlayerItemVideoOutput + vImage |
 | `FramePreprocessor.java` | `FramePreprocessor.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐位校验） |
+| `ScreenCropper.java` | `ScreenCropper.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐帧校验） |
+| `OnlineAnalysisService.java`（MediaProjection 录屏） | `XcupBroadcast` 广播上传扩展（ReplayKit）：按 `RPVideoSampleOrientationKey` 转正，画面连同方向经 App Group 传给主 App |
 | Handler / Runnable | DispatchQueue、DispatchSourceTimer、CADisplayLink |
 | `PcmCircularBuffer.java` | `PcmCircularBuffer.swift` |
 | `FusionArbiter.java` | `FusionArbiter.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐 tick 校验） |
@@ -86,6 +88,7 @@ flowchart TB
 | `VideoProcessViewController.swift` | 视频播放、音视频分析、结果融合、UI 更新和 BLE 控制 |
 | `VideoFrameExtractor.swift` | 用 AVPlayerItemVideoOutput 取播放器此刻显示的那一帧，居中裁正方形、vImage 缩到 672×672 后交给 FramePreprocessor，并按 preferredTransform 转正 |
 | `FramePreprocessor.swift` | 视频模型输入的预处理（居中裁正方形、面积平均缩小到 160×160），与训练素材的处理一致，离线、在线两种模式共用 |
+| `ScreenCropper.swift` | 在线模式：在截屏里找出视频画面（去掉四周对称的黑边），再交给 `FramePreprocessor` 取视频画面的居中正方形 |
 | `AudioDecoder.swift` | 使用 AVAssetReader 解码音频、限速、Seek 并写入 PCM 缓冲区 |
 | `PcmCircularBuffer.swift` | 管理 PCM 环形缓冲、时间窗口读取和并发访问 |
 | `AudioInferenceHelper.swift` | YAMNet 特征提取与自定义音频分类器推理；同一次推理取 AudioSet 521 类分数 |
@@ -104,7 +107,7 @@ flowchart TB
 - 模型文件：`mobilenetv3small_tap_3class_float32.tflite`
 - 输入：`[1, 12, 160, 160, 3]`，`float32`，NHWC，RGB；12 帧是最近 3 秒里间隔 250ms 的 12 个不同时刻
 - 像素范围：`0-255`，模型内部包含 Rescaling，不应再次归一化
-- 每帧的预处理与训练素材一致：先转正，再居中裁正方形（边长 = 短边），面积平均缩到 224，再缩到 160（`FramePreprocessor`）
+- 每帧的预处理与训练素材一致：先转正，再居中裁正方形（边长 = 短边），面积平均缩到 224，再缩到 160（`FramePreprocessor`）；在线模式先去掉截屏里视频四周的黑边（`ScreenCropper`），取的是视频画面的居中正方形
 - 输出：`normal_plot`、`oral`、`sex` 三类 softmax 概率
 
 ### 音频模型
@@ -207,8 +210,8 @@ pod install
 ### 在线/直播分析
 
 1. 进入在线分析模式并完成系统要求的授权。
-2. 启动需要分析的实时画面来源。
-3. 应用持续执行画面、音频、融合和 BLE 控制链路。
+2. 启动需要分析的实时画面来源。横屏全屏播放时，截到的画面与训练素材的取法一致，识别效果最好。
+3. 应用持续执行画面、音频、融合和 BLE 控制链路。截屏里视频四周的黑边（竖屏全屏播放、横屏看竖屏视频）先去掉再居中裁剪；转屏后 12 帧窗口清空重攒，约 3.5 秒后出第一个视频结果。
 4. 退出在线模式时停止分析并向硬件发送停止状态。
 
 ## 蓝牙协议

@@ -188,6 +188,9 @@ class VideoProcessViewController: UIViewController {
     private var frameBuffer: [[UInt32]] = []
     private var frameTimeBuffer: [Int64] = []
     private var lastVideoInferenceMs: Int64 = 0
+    #if DEBUG
+    private let inputDumper = ModelInputDumper(name: "offline")   // 验收用：定时把送进模型的 160×160 存成 PNG
+    #endif
 
     // MARK: - 视频分组概率阈值（与 Android 对齐：在 oral/sex 归并后的分组概率上判定）
     private let VIDEO_DO_PROB_THRESHOLD: Float = 0.65    // P(oral)+P(sex) ≥ 0.65 → "do"
@@ -677,6 +680,10 @@ class VideoProcessViewController: UIViewController {
         if let last = frameTimeBuffer.last, last == frame.ptsMs {
             return
         }
+        #if DEBUG
+        // 验收用（iOS 在线模式检查清单 6.2）：同一部片离线、在线模式送进模型的画面放在一起比
+        inputDumper.dumpIfDue(frame.pixels, note: "\(frame.ptsMs)ms")
+        #endif
 
         // 3. 推入环形缓冲（最多 12 帧），帧和时刻一一对应
         frameBuffer.append(frame.pixels)
