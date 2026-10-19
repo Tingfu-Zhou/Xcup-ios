@@ -22,7 +22,6 @@ import AVFoundation
 class OnlineAnalysisViewController: UIViewController {
 
     // MARK: - UI 元素
-    private let previewImageView  = UIImageView()
     private let statusLabel       = UILabel()
     private let tvVideoAction     = UILabel()
     private let tvAudioAction     = UILabel()
@@ -33,6 +32,8 @@ class OnlineAnalysisViewController: UIViewController {
 
     // 未广播时的居中覆盖层
     private let startOverlay      = UIView()
+    // 广播中显示的状态（只有图标和文字，不显示录到的画面，见 setupRunningView）
+    private let runningView       = UIView()
 
     // MARK: - 诊断计数器
     // private var audioChunksReceived  = 0
@@ -59,17 +60,6 @@ class OnlineAnalysisViewController: UIViewController {
     private let FRAME_INTERVAL: TimeInterval = 0.1
     private var latestFrame: (image: UIImage, info: SharedVideoFrame)?   // 扩展最新的一帧和它的方向，视频分析取走后置空
     private let frameLock = NSLock()
-
-    // MARK: - 预览（只管显示，不影响送进模型的画面）
-    // 预览显示的是录到的屏幕，而屏幕上又有这个预览：Xcup 在前台时是"镜子对着镜子"，一层套一层、和屏幕一样大，
-    // 每一帧都是上一帧的拷贝。一闪而过的画面（转屏途中转到一半的界面、宽高比不对时露出的底色、开始录屏时的系统弹窗）
-    // 一旦进了这个循环就会一直留在里面：转屏后的"万花镜"、白边。所以：
-    // 1. 转屏（view 尺寸变了）时先清空预览，等 PREVIEW_ROTATE_HOLD_SEC 再显示，转动过程中录到的帧都不显示；
-    // 2. 预览按 PREVIEW_ALPHA 半透明显示，旧画面每套一层就淡一次（0.7 每帧，约 2 秒后不到 3%），不会永远留着
-    private let PREVIEW_ALPHA: CGFloat = 0.7
-    private let PREVIEW_ROTATE_HOLD_SEC: CFTimeInterval = 1.0
-    private var previewHoldUntil: CFTimeInterval = 0     // 只在主线程读写
-    private var lastLayoutSize: CGSize = .zero           // 只在主线程读写
 
     // MARK: - 推理模块
     // private var inferenceHelper:        InferenceHelper!     // 已弃用：ML Kit + ST-GCN++
@@ -209,19 +199,6 @@ class OnlineAnalysisViewController: UIViewController {
         stopAllActivity()
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        // 尺寸变了就是转屏（布局在转屏动画一开始就按新尺寸做）：清空预览，转动过程中录到的帧不显示。
-        // 用尺寸变化而不是 viewWillTransition：这个页面嵌在 SwiftUI 里，转屏回调不一定转发到这里
-        let size = view.bounds.size
-        guard size != lastLayoutSize else { return }
-        if lastLayoutSize != .zero {
-            previewImageView.image = nil
-            previewHoldUntil = CACurrentMediaTime() + PREVIEW_ROTATE_HOLD_SEC
-        }
-        lastLayoutSize = size
-    }
-
     deinit {
         videoLoopItem?.cancel()
         audioLoopItem?.cancel()
@@ -238,18 +215,8 @@ class OnlineAnalysisViewController: UIViewController {
     private func setupUI() {
         view.backgroundColor = .md3Background
 
-        // 屏幕预览（广播开始后显示）。半透明：录到的画面里又有预览，旧画面要能淡掉（见 PREVIEW_ALPHA）
-        previewImageView.translatesAutoresizingMaskIntoConstraints = false
-        previewImageView.contentMode = .scaleAspectFit
-        previewImageView.backgroundColor = .md3Background
-        previewImageView.alpha = PREVIEW_ALPHA
-        view.addSubview(previewImageView)
-        NSLayoutConstraint.activate([
-            previewImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            previewImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            previewImageView.topAnchor.constraint(equalTo: view.topAnchor),
-            previewImageView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        // 广播中的状态（广播开始后显示）
+        setupRunningView()
 
         // 分析结果标签
         let labels = [tvVideoAction, tvAudioAction, tvOverlay]
@@ -323,6 +290,61 @@ class OnlineAnalysisViewController: UIViewController {
             btnStop.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             btnStop.widthAnchor.constraint(equalToConstant: 120),
             btnStop.heightAnchor.constraint(equalToConstant: 40)
+        ])
+    }
+
+    /// 广播中显示的状态，对应 Android 在线分析页的状态卡片（「在线分析已启动」「可以返回桌面，观看在线视频」）。
+    /// 页面上不显示录到的画面：录屏录的是整个屏幕，Xcup 在前台时也录到这个页面，把录到的画面再显示出来，
+    /// 下一帧就录到"显示着上一帧的页面"，画面里套着画面、一层套一层（镜子对着镜子）。原来全屏的预览就是这样，
+    /// 2026-10-15 改成半透明、转屏时清空也只是让旧的那几层淡得快一点，循环还在。Android 一直没有预览。
+    /// 送进视频模型的帧不受影响（latestFrame → performVideoAnalysis）
+    private func setupRunningView() {
+        runningView.translatesAutoresizingMaskIntoConstraints = false
+        runningView.isHidden = true
+        view.addSubview(runningView)
+
+        let iconView = UIImageView()
+        iconView.image = UIImage(systemName: "dot.radiowaves.left.and.right",
+                                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 56, weight: .regular))
+        iconView.tintColor = .md3Primary
+        iconView.contentMode = .scaleAspectFit
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = UILabel()
+        titleLabel.text = "在线分析已启动"
+        titleLabel.font = .systemFont(ofSize: 28, weight: .medium)
+        titleLabel.textColor = .md3OnBackground
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let descLabel = UILabel()
+        descLabel.text = "可以返回桌面，观看在线视频。如需退出在线分析，可点击屏幕上方通知栏「直播屏幕」，并点击停止按钮。"
+        descLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        descLabel.textColor = .md3OnSurfaceVariant
+        descLabel.textAlignment = .center
+        descLabel.numberOfLines = 0
+        descLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        [iconView, titleLabel, descLabel].forEach { runningView.addSubview($0) }
+
+        NSLayoutConstraint.activate([
+            runningView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
+            runningView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
+            runningView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+
+            iconView.topAnchor.constraint(equalTo: runningView.topAnchor),
+            iconView.centerXAnchor.constraint(equalTo: runningView.centerXAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 80),
+            iconView.heightAnchor.constraint(equalToConstant: 80),
+
+            titleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: runningView.leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: runningView.trailingAnchor),
+
+            descLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
+            descLabel.leadingAnchor.constraint(equalTo: runningView.leadingAnchor),
+            descLabel.trailingAnchor.constraint(equalTo: runningView.trailingAnchor),
+            descLabel.bottomAnchor.constraint(equalTo: runningView.bottomAnchor)
         ])
     }
 
@@ -561,7 +583,7 @@ class OnlineAnalysisViewController: UIViewController {
             self.onNewAudioData()
         }
 
-        // 新视频帧通知（更新预览图）
+        // 新视频帧通知（存下最新一帧，给视频分析用）
         // 同上，作为广播已启动的兜底检测
         videoToken = registerDarwinObserver(name: kDarwinVideo) { [weak self] in
             guard let self else { return }
@@ -590,6 +612,7 @@ class OnlineAnalysisViewController: UIViewController {
         let ipcOk = (reader != nil)
         isBroadcasting = true
         startOverlay.isHidden = true
+        runningView.isHidden = false
         // tvDiag.isHidden = false
         if ipcOk {
             statusLabel.text = "Extension 已连接 — 等待声音..."
@@ -644,11 +667,7 @@ class OnlineAnalysisViewController: UIViewController {
         // videoFramesReceived += 1
         // refreshDiagIfNeeded()
 
-        DispatchQueue.main.async { [weak self] in
-            // 转屏后的等待期内不显示（见 viewDidLayoutSubviews）；送进模型的帧不受影响
-            guard let self, CACurrentMediaTime() >= self.previewHoldUntil else { return }
-            self.previewImageView.image = image
-        }
+        // 只给视频分析用，不显示到页面上（见 setupRunningView：显示出来就是画面里套画面）
     }
 
     // MARK: - 诊断面板更新
@@ -793,6 +812,7 @@ class OnlineAnalysisViewController: UIViewController {
         resetScreenFrames("广播停止")
 
         // 重新显示启动覆盖层
+        runningView.isHidden = true
         startOverlay.isHidden = false
         // tvDiag.isHidden = true
     }

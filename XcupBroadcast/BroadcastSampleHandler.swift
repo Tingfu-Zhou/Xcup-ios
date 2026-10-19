@@ -360,7 +360,7 @@ class BroadcastSampleHandler: RPBroadcastSampleHandler {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         // ReplayKit 给的缓冲区总是设备竖着时的方向：横屏全屏看视频时，画面是横躺在里面的，方向写在
-        // RPVideoSampleOrientationKey（CGImagePropertyOrientation）里。先转正，主 App 的预览和送进视频模型的都是正的画面
+        // RPVideoSampleOrientationKey（CGImagePropertyOrientation）里。先转正，送进视频模型的是正的画面
         // （模型只见过正的画面；主 App 再去掉视频四周的黑边、取视频画面的居中正方形，见 ScreenCropper、FramePreprocessor）。
         // 方向的原值随帧传给主 App：方向变了（转屏）主 App 清空 12 帧窗口
         let rawOrientation = (CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
