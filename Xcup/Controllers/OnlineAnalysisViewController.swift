@@ -218,7 +218,14 @@ class OnlineAnalysisViewController: UIViewController {
         // 广播中的状态（广播开始后显示）
         setupRunningView()
 
-        // 分析结果标签
+        // 分析结果标签（调试悬浮窗：视频分析 / 音频分析 / 蓝牙输出结果）
+        // 与离线模式一样只在 Debug 构建显示（Xcode 里直接 Run 到手机用的是 Debug），Archive 打出的 Release 包隐藏。
+        // Android 在线模式的正式包也不显示这三行；只改显隐，分析、融合和蓝牙发送逻辑不变
+        #if DEBUG
+        let showDebugPanel = true
+        #else
+        let showDebugPanel = false
+        #endif
         let labels = [tvVideoAction, tvAudioAction, tvOverlay]
         let titles  = ["V: 等待...", "A: 等待...", "Final: 等待..."]
         for (i, label) in labels.enumerated() {
@@ -230,6 +237,7 @@ class OnlineAnalysisViewController: UIViewController {
             label.layer.cornerRadius = 8
             label.layer.cornerCurve  = .continuous
             label.clipsToBounds    = true
+            label.isHidden         = !showDebugPanel
             view.addSubview(label)
             NSLayoutConstraint.activate([
                 label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
