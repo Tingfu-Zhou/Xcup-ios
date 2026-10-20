@@ -29,7 +29,7 @@ struct ContentView: View {
     @State private var isBluetoothConnected = false
     @State private var isBluetoothScanning = false
     @State private var isBluetoothPaused = false
-    @State private var bluetoothStatusText = "未连接"
+    @State private var bluetoothStatusText = String(localized: "未连接")
     
     // 主页面「已暂停app操作，点击恢复」按钮实际很少用到，先隐藏（与 Android 版一致）。
     // 暂停回调和点击逻辑都保留，要恢复显示改成 true 即可。
@@ -226,7 +226,7 @@ struct ContentView: View {
                 let info = optionalUpdateInfo
                 return Alert(
                     title: Text("发现新版本 \(info?.latest ?? "")"),
-                    message: Text(info?.notes ?? "为获得更佳体验，建议更新。"),
+                    message: Text(info?.notes ?? String(localized: "为获得更佳体验，建议更新。")),
                     primaryButton: .default(Text("前往 App Store")) {
                         if let urlStr = info?.appStoreUrl, let url = URL(string: urlStr) {
                             UIApplication.shared.open(url)
@@ -261,12 +261,12 @@ struct ContentView: View {
             onConnect: {
                 self.isBluetoothConnected = true
                 self.isBluetoothScanning = false
-                self.bluetoothStatusText = "已连接"
+                self.bluetoothStatusText = String(localized: "已连接")
             },
             onDisconnect: {
                 self.isBluetoothConnected = false
                 self.isBluetoothPaused = false
-                self.bluetoothStatusText = "未连接"
+                self.bluetoothStatusText = String(localized: "未连接")
             },
             onPause: {
                 // 锁定期间每按一次实体按键都会再通知一次 pause，只在「未暂停 → 暂停」时提示一次
@@ -286,18 +286,18 @@ struct ContentView: View {
         if isBluetoothConnected {
             // 已连接，点击断开
             BluetoothManager.shared.disconnect()
-            bluetoothStatusText = "未连接"
+            bluetoothStatusText = String(localized: "未连接")
         } else {
             // 未连接，开始扫描
             isBluetoothScanning = true
-            bluetoothStatusText = "扫描中..."
+            bluetoothStatusText = String(localized: "扫描中...")
             BluetoothManager.shared.startScanAndConnect()
             
             // 20秒超时
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
                 if !self.isBluetoothConnected {
                     self.isBluetoothScanning = false
-                    self.bluetoothStatusText = "扫描超时"
+                    self.bluetoothStatusText = String(localized: "扫描超时")
                 }
             }
         }
@@ -391,7 +391,7 @@ struct ContentView: View {
             
         } catch {
             await MainActor.run {
-                self.errorMessage = "视频加载失败: \(error.localizedDescription)"
+                self.errorMessage = String(localized: "视频加载失败: \(error.localizedDescription)")
                 self.isLoadingVideo = false
                 self.selectedItem = nil
             }
@@ -435,7 +435,7 @@ struct ContentView: View {
                         }
                     } else {
                         continuation.resume(throwing: NSError(domain: "VideoLoad", code: -1,
-                                                            userInfo: [NSLocalizedDescriptionKey: "无法获取视频资源"]))
+                                                            userInfo: [NSLocalizedDescriptionKey: String(localized: "无法获取视频资源")]))
                     }
                     return
                 }
@@ -466,7 +466,7 @@ struct ContentView: View {
         guard let exportSession = AVAssetExportSession(asset: asset,
                                                       presetName: AVAssetExportPresetPassthrough) else {
             throw NSError(domain: "VideoExport", code: -1,
-                         userInfo: [NSLocalizedDescriptionKey: "无法创建导出会话"])
+                         userInfo: [NSLocalizedDescriptionKey: String(localized: "无法创建导出会话")])
         }
         
         exportSession.outputURL = tmpURL
@@ -478,7 +478,7 @@ struct ContentView: View {
             return tmpURL
         } else {
             throw exportSession.error ?? NSError(domain: "VideoExport", code: -1,
-                                               userInfo: [NSLocalizedDescriptionKey: "导出失败"])
+                                               userInfo: [NSLocalizedDescriptionKey: String(localized: "导出失败")])
         }
     }
     
@@ -492,7 +492,7 @@ struct ContentView: View {
             return tmpURL
         } else {
             throw NSError(domain: "VideoLoad", code: -1,
-                         userInfo: [NSLocalizedDescriptionKey: "无法加载视频数据"])
+                         userInfo: [NSLocalizedDescriptionKey: String(localized: "无法加载视频数据")])
         }
     }
     
@@ -519,7 +519,7 @@ private struct RequiredUpdateView: View {
                     .foregroundColor(.white)
                 Text("必须更新以继续使用")
                     .font(.title2).bold().foregroundColor(.white)
-                Text(info?.notes ?? "为保证兼容性与稳定性，请更新到最新版。")
+                Text(info?.notes ?? String(localized: "为保证兼容性与稳定性，请更新到最新版。"))
                     .foregroundColor(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)

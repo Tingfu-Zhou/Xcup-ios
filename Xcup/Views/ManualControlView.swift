@@ -27,9 +27,9 @@ struct ManualControlView: View {
 
     /// 变频模式说明
     private static let patternDescriptions: [UInt8: String] = [
-        1: "只有正转，持续同向抽送",
-        2: "1200ms 反转 → 600ms 正转 → 1100ms 反转",
-        3: "2000ms 反转 → 3000ms 正转"
+        1: String(localized: "只有正转，持续同向抽送"),
+        2: String(localized: "1200ms 反转 → 600ms 正转 → 1100ms 反转"),
+        3: String(localized: "2000ms 反转 → 3000ms 正转")
     ]
 
     /// 各强度档位对应的转速（RPM）
@@ -57,7 +57,7 @@ struct ManualControlView: View {
     @State private var level: Double = 0
     @State private var isConnected      = BluetoothManager.shared.isConnected
     @State private var isPausedByLocal  = BluetoothManager.shared.isPausedByLocal
-    @State private var statusText       = "尚未下发指令"
+    @State private var statusText       = String(localized: "尚未下发指令")
 
     @State private var observerToken: UUID?
     @State private var lastSendTime: TimeInterval = 0
@@ -225,7 +225,7 @@ struct ManualControlView: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                Text("模式 \(id)")
+                Text("模式 \(Int(id))")
                     .font(MD3Typography.titleMedium)
             }
             .foregroundColor(fg)
@@ -285,9 +285,9 @@ struct ManualControlView: View {
 
     private var levelDetailText: String {
         let index = levelIndex
-        guard index > 0 else { return "停止" }
+        guard index > 0 else { return String(localized: "停止") }
         let hz = String(format: "%.2f", Self.levelHz[index])
-        return "转速 \(Self.levelRpm[index]) RPM · 伸缩 \(hz) Hz"
+        return String(localized: "转速 \(Self.levelRpm[index]) RPM · 伸缩 \(hz) Hz")
     }
 
     private var levelIndex: Int {
@@ -512,23 +512,23 @@ struct ManualControlView: View {
             BluetoothStateObserver(
                 onConnect: {
                     self.isConnected = true
-                    self.statusText  = "设备已连接"
+                    self.statusText  = String(localized: "设备已连接")
                 },
                 onDisconnect: {
                     self.cancelPendingSend()
                     self.isConnected     = false
                     self.isPausedByLocal = false
                     self.level           = 0
-                    self.statusText      = "设备已断开连接"
+                    self.statusText      = String(localized: "设备已断开连接")
                 },
                 onPause: {
                     self.cancelPendingSend()
                     self.isPausedByLocal = true
-                    self.statusText      = "设备正在本地按键控制，已暂停 App 下发"
+                    self.statusText      = String(localized: "设备正在本地按键控制，已暂停 App 下发")
                 },
                 onResume: {
                     self.isPausedByLocal = false
-                    self.statusText      = "已恢复 App 控制"
+                    self.statusText      = String(localized: "已恢复 App 控制")
                 }
             )
         )
@@ -563,8 +563,8 @@ struct ManualControlView: View {
 
         if !sendsManually {
             statusText = analysisResent
-                ? "已切换到模式 \(id)，视频分析正在运行，已即时生效"
-                : "已切换到模式 \(id)（强度为 0，未下发）"
+                ? String(localized: "已切换到模式 \(Int(id))，视频分析正在运行，已即时生效")
+                : String(localized: "已切换到模式 \(Int(id))（强度为 0，未下发）")
         }
     }
 
@@ -573,12 +573,12 @@ struct ManualControlView: View {
         let sent = BluetoothManager.shared.sendStopAll()
         // 归零只同步界面，不触发下发（避免重复发帧）
         level = 0
-        statusText = sent ? "已发送紧急停止" : "紧急停止发送失败：蓝牙未连接"
+        statusText = sent ? String(localized: "已发送紧急停止") : String(localized: "紧急停止发送失败：蓝牙未连接")
     }
 
     private func resumeAppControl() {
         BluetoothManager.shared.resumeAppControl()
-        statusText = "已发送恢复控制命令，等待设备确认…"
+        statusText = String(localized: "已发送恢复控制命令，等待设备确认…")
     }
 
     // MARK: - 下发节流（最小间隔 150ms，排队式）
@@ -619,14 +619,14 @@ struct ManualControlView: View {
 
         if sent {
             statusText = intLevel == 0
-                ? "已下发：模式 \(patternId) · 强度 0（停止）"
-                : "已下发：模式 \(patternId) · 强度 \(intLevel)"
+                ? String(localized: "已下发：模式 \(Int(patternId)) · 强度 0（停止）")
+                : String(localized: "已下发：模式 \(Int(patternId)) · 强度 \(Int(intLevel))")
         } else if !BluetoothManager.shared.isConnected {
-            statusText = "下发失败：蓝牙未连接"
+            statusText = String(localized: "下发失败：蓝牙未连接")
         } else if BluetoothManager.shared.isPausedByLocal {
-            statusText = "下发失败：设备正在本地按键控制"
+            statusText = String(localized: "下发失败：设备正在本地按键控制")
         } else {
-            statusText = "下发失败：参数无效"
+            statusText = String(localized: "下发失败：参数无效")
         }
     }
 }

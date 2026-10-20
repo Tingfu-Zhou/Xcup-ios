@@ -285,7 +285,7 @@ class OnlineAnalysisViewController: UIViewController {
 
         // 返回主页面按钮：z 轴最高，始终在覆盖层之上可点击
         btnStop.translatesAutoresizingMaskIntoConstraints = false
-        btnStop.setTitle("返回主页面", for: .normal)
+        btnStop.setTitle(String(localized: "返回主页面"), for: .normal)
         btnStop.setTitleColor(.md3OnError, for: .normal)
         btnStop.backgroundColor    = .md3Error
         btnStop.layer.cornerRadius = 20
@@ -319,14 +319,14 @@ class OnlineAnalysisViewController: UIViewController {
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = UILabel()
-        titleLabel.text = "在线分析已启动"
+        titleLabel.text = String(localized: "在线分析已启动")
         titleLabel.font = .systemFont(ofSize: 28, weight: .medium)
         titleLabel.textColor = .md3OnBackground
         titleLabel.textAlignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let descLabel = UILabel()
-        descLabel.text = "可以返回桌面，观看在线视频。如需退出在线分析，可点击屏幕上方通知栏「直播屏幕」，并点击停止按钮。"
+        descLabel.text = String(localized: "可以返回桌面，观看在线视频。如需退出在线分析，可点击屏幕上方通知栏「直播屏幕」，并点击停止按钮。")
         descLabel.font = .systemFont(ofSize: 14, weight: .regular)
         descLabel.textColor = .md3OnSurfaceVariant
         descLabel.textAlignment = .center
@@ -414,7 +414,7 @@ class OnlineAnalysisViewController: UIViewController {
 
         // 标题（MD3 Headline Medium）
         let titleLabel = UILabel()
-        titleLabel.text = "在线模式"
+        titleLabel.text = String(localized: "在线模式")
         titleLabel.font = .systemFont(ofSize: 28, weight: .medium)
         titleLabel.textColor = .md3OnBackground
         titleLabel.textAlignment = .center
@@ -422,7 +422,7 @@ class OnlineAnalysisViewController: UIViewController {
 
         // 说明文字（MD3 Body Medium）
         let descLabel = UILabel()
-        descLabel.text = "点击下方按钮，在弹出的系统对话框中选择「开始直播」即开始在线视频模式，可以返回桌面，观看在线视频。所有信息皆在本地处理，不会上传至服务器。"
+        descLabel.text = String(localized: "点击下方按钮，在弹出的系统对话框中选择「开始直播」即开始在线视频模式，可以返回桌面，观看在线视频。所有信息皆在本地处理，不会上传至服务器。")
         descLabel.font = .systemFont(ofSize: 14, weight: .regular)
         descLabel.textColor = .md3OnSurfaceVariant
         descLabel.textAlignment = .center
@@ -432,24 +432,24 @@ class OnlineAnalysisViewController: UIViewController {
         // ── 用户提示卡片 ──
         let tip1 = makeTipCard(
             icon: "play.rectangle",
-            title: "推荐观看方式",
-            body: "建议将手机横屏并全屏播放视频，识别效果最佳。"
+            title: String(localized: "推荐观看方式"),
+            body: String(localized: "建议将手机横屏并全屏播放视频，识别效果最佳。")
         )
         let tip2 = makeTipCard(
             icon: "exclamationmark.triangle",
-            title: "温馨提示",
-            body: "部分浏览器（如 Chrome、Firefox）出于安全考虑，会自动将屏幕共享中的视频画面遮黑，并显示「为了安全起见，屏幕共享画面已隐藏此应用的内容」等提示。为了保证分析的准确性，录屏模式建议使用对应视频网站的官方 App 直接观看视频（部分 App 会禁止屏幕/音频抓取）。"
+            title: String(localized: "温馨提示"),
+            body: String(localized: "部分浏览器（如 Chrome、Firefox）出于安全考虑，会自动将屏幕共享中的视频画面遮黑，并显示「为了安全起见，屏幕共享画面已隐藏此应用的内容」等提示。为了保证分析的准确性，录屏模式建议使用对应视频网站的官方 App 直接观看视频（部分 App 会禁止屏幕/音频抓取）。")
         )
         let tip3 = makeTipCard(
             icon: "stop.circle",
-            title: "退出提示",
-            body: "如需退出在线分析，可点击屏幕上方通知栏「直播屏幕」，并点击停止按钮。"
+            title: String(localized: "退出提示"),
+            body: String(localized: "如需退出在线分析，可点击屏幕上方通知栏「直播屏幕」，并点击停止按钮。")
         )
 
         // ── MD3 Filled Primary 按钮 ──
         let broadcastBtn = UIButton(type: .system)
         broadcastBtn.translatesAutoresizingMaskIntoConstraints = false
-        broadcastBtn.setTitle("开始广播", for: .normal)
+        broadcastBtn.setTitle(String(localized: "开始广播"), for: .normal)
         broadcastBtn.setTitleColor(.md3OnPrimary, for: .normal)
         broadcastBtn.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
         broadcastBtn.backgroundColor = .md3Primary
@@ -623,10 +623,10 @@ class OnlineAnalysisViewController: UIViewController {
         runningView.isHidden = false
         // tvDiag.isHidden = false
         if ipcOk {
-            statusLabel.text = "Extension 已连接 — 等待声音..."
+            statusLabel.text = String(localized: "Extension 已连接 — 等待声音...")
             // updateDiag(extensionConnected: true, ipcOk: true)
         } else {
-            statusLabel.text = "⚠️ App Groups 未配置，数据无法传输"
+            statusLabel.text = String(localized: "⚠️ App Groups 未配置，数据无法传输")
             // updateDiag(extensionConnected: true, ipcOk: false)
         }
         // 🆕 [融合仲裁] 同一个页面里可以停止再重新开始广播：上一次广播的证据不能带进这一次
@@ -732,7 +732,7 @@ class OnlineAnalysisViewController: UIViewController {
             consecutiveSilentFrames = 0
             if isAnalysisPaused {
                 resumeAnalysis()
-                DispatchQueue.main.async { self.statusLabel.text = "在线分析中" }
+                DispatchQueue.main.async { self.statusLabel.text = String(localized: "在线分析中") }
             }
         } else {
             consecutiveSilentFrames += 1
@@ -740,7 +740,7 @@ class OnlineAnalysisViewController: UIViewController {
                 let silenced = Date().timeIntervalSince1970 - lastAudioActiveTime
                 if silenced > SILENCE_THRESHOLD_SEC && !isAnalysisPaused {
                     pauseAnalysis()
-                    DispatchQueue.main.async { self.statusLabel.text = "在线分析中 — 等待声音..." }
+                    DispatchQueue.main.async { self.statusLabel.text = String(localized: "在线分析中 — 等待声音...") }
                 }
             }
         }

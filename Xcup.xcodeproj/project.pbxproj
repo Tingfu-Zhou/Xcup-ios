@@ -312,11 +312,12 @@
 				};
 			};
 			buildConfigurationList = 5D8CC9842DB548A400B61F48 /* Build configuration list for PBXProject "Xcup" */;
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
 				Base,
+				"zh-Hans",
+				ja,
 			);
 			mainGroup = 5D8CC9802DB548A400B61F48;
 			minimizedProjectReferenceProxies = 1;

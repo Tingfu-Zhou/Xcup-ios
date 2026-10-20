@@ -22,6 +22,7 @@ Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在�
 - 本地按键优先：硬件按键可暂停 App 控制，暂停时屏幕底部弹出提示；用户可在手动电子菜单页点「恢复控制」手动恢复（主界面的恢复按钮已隐藏）。
 - 播放同步：支持播放、暂停、Seek、播放结束恢复和横竖屏切换；Seek 后会重置历史状态并重新同步分析链路。
 - 应用更新检查：通过远端版本配置判断推荐更新或强制更新，并跳转 App Store。
+- 多语言界面：中文与日语，按系统语言自动切换；也可以在「设置 → Xcup → 语言」里单独为本 App 选择语言。
 
 ## 与 Android 版的关系
 
@@ -197,6 +198,17 @@ pod install
 2. 设置 Team、Bundle Identifier、Version 和 Build。
 3. 连接 iPhone 或 iPad 真机。
 4. 执行 Build & Run。
+
+## 多语言
+
+界面文字支持中文和日语，按系统语言自动切换：系统语言是日语时显示日语，其余情况显示中文（工程的开发语言是简体中文）。用户也可以在「设置 → Xcup → 语言」里单独为本 App 选择语言。
+
+- `Xcup/Localizable.xcstrings`：界面文字。键就是代码里的中文原文，日语译文写在 `ja` 下
+- `Xcup/InfoPlist.xcstrings`：蓝牙、相册、麦克风等权限说明的日语译文（中文原文仍在 Build Settings 的 `INFOPLIST_KEY_*` 里）
+
+新增界面文字时：SwiftUI 的 `Text("中文")`、`Label("中文", systemImage:)` 等在编译时会自动收进 `Localizable.xcstrings`，在 Xcode 里补上日语即可；UIKit 控件的文字、或先存进 `String` 变量再显示的文字，要写成 `String(localized: "中文")`，否则不会被翻译。带插值的文字（如 `"\(n) 分钟后"`）在表里显示为 `%lld 分钟后`，日语译文保留同样的占位符。只在调试悬浮窗和日志里出现的文字不需要翻译。
+
+更新弹窗的说明来自 `version.json` 的 `ios` 段：可以加一个 `notes_ja`，界面是日文时显示它，没填就显示 `notes`。
 
 ## 使用流程
 

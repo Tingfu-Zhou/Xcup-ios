@@ -16,6 +16,20 @@ struct RemoteVersionConfig: Decodable {
         let minSupported: String
         let appStoreUrl: String
         let notes: String?
+        let notesJa: String?    // 可选：日文界面用的更新说明，没填就用 notes
+
+        enum CodingKeys: String, CodingKey {
+            case latest, minSupported, appStoreUrl, notes
+            case notesJa = "notes_ja"
+        }
+
+        /// 界面是日文、且配置里填了 notes_ja 时用日文说明；否则用 notes（没填 notes_ja 时与原来一样）
+        var localizedNotes: String? {
+            if Bundle.main.preferredLocalizations.first == "ja", let ja = notesJa, !ja.isEmpty {
+                return ja
+            }
+            return notes
+        }
     }
 }
 
@@ -64,13 +78,13 @@ final class UpdateService {
                 result = .required(info: .init(latest: ios.latest,
                                                minSupported: ios.minSupported,
                                                appStoreUrl: ios.appStoreUrl,
-                                               notes: ios.notes))
+                                               notes: ios.localizedNotes))
             } else if self.compareVersion(local, ios.latest) == .orderedAscending {
                 // 本地 < latest → 推荐更新
                 result = .optional(info: .init(latest: ios.latest,
                                                minSupported: ios.minSupported,
                                                appStoreUrl: ios.appStoreUrl,
-                                               notes: ios.notes))
+                                               notes: ios.localizedNotes))
             } else {
                 result = .none
             }
