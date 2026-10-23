@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var selectedVideoURL: URL?
     @State private var showVideoProcessView = false
     @State private var showOnlineAnalysis   = false   // [新增] 在线模式开关
+    @State private var showManualControl    = false   // [新增] 手动电子菜单（蓝牙连上后才能进入）
     // [已删除] @State private var showBluetoothView = false
     @State private var isLoadingVideo = false
     @State private var errorMessage: String?
@@ -36,10 +37,11 @@ struct ContentView: View {
     // 设备被本地按键锁定时，仍可在手动电子菜单页点「恢复控制」。
     private static let showsResumeControlButton = false
 
-    // [新增] 设备被本地按键锁定时的轻提示（对应 Android 主页的 Toast「设备正在本地控制，暂停app控制」）。
-    // 盖在整个导航栈上（在线模式页单独再加一层），视频分析、手动电子菜单等页面也能看到；不拦截点击，3.5 秒后自动消失
-    @State private var showsLockToast = false
-    @State private var lockToastHideWork: DispatchWorkItem?
+    // [新增] 底部轻提示（对应 Android 主页的 Toast）：设备被本地按键锁定时提示「设备正在本地控制，暂停app控制」，
+    // 没连蓝牙就点手动电子菜单时提示「请先连接蓝牙设备」。
+    // 盖在整个导航栈上（在线模式页单独再加一层），视频分析、手动电子菜单等页面也能看到；不拦截点击，到时自动消失
+    @State private var toastText: String?
+    @State private var toastHideWork: DispatchWorkItem?
 
     // NEW: 更新提示所需状态
     @State private var optionalUpdateInfo: UpdateInfo? = nil       // 可更新
@@ -124,7 +126,7 @@ struct ContentView: View {
                                 .ignoresSafeArea()
                                 // 在线模式页是单独弹出的全屏页，主页那层提示盖不到，这里再加一层
                                 .overlay(alignment: .bottom) {
-                                    if showsLockToast { LockToastView() }
+                                    if let toastText { ToastView(text: toastText) }
                                 }
                         }
 
@@ -145,8 +147,10 @@ struct ContentView: View {
                                 .fill(Color.md3Surface)
                         )
 
-                        // [新增] 手动电子菜单入口：在 app 上直接调节模式与强度
-                        NavigationLink(destination: ManualControlView()) {
+                        // [新增] 手动电子菜单入口：在 app 上直接调节模式与强度。
+                        // 模式和强度都要通过蓝牙下发，所以要先在上面连上蓝牙设备才能进入（与 Android 一致）：
+                        // 没连上时半透明、副文本提示先连接，点击只弹提示
+                        Button(action: openManualControl) {
                             HStack(spacing: 12) {
                                 Image(systemName: "slider.horizontal.3")
                                     .font(.system(size: 18, weight: .medium))
@@ -157,7 +161,7 @@ struct ContentView: View {
                                     Text("手动电子菜单")
                                         .font(MD3Typography.titleMedium)
                                         .foregroundColor(.md3OnSurface)
-                                    Text("在 app 上直接调节模式与强度")
+                                    Text(isBluetoothConnected ? "在 app 上直接调节模式与强度" : "连接蓝牙设备后可用")
                                         .font(MD3Typography.bodySmall)
                                         .foregroundColor(.md3OnSurfaceVariant)
                                 }
@@ -172,8 +176,20 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(Color.md3Surface)
                             )
+                            // 半透明（灰色效果），与 Android 主页一致
+                            .opacity(isBluetoothConnected ? 1 : 0.5)
                         }
                         .buttonStyle(.plain)
+                        // 隐形 NavigationLink（带 onDisappear 手动复位，同下面视频分析页那个），由 openManualControl 在蓝牙已连接时打开。
+                        // 不随蓝牙状态增删：进了手动电子菜单之后蓝牙断开也不会被弹回主页（手动页自己会置灰控件、提示回主页重连）
+                        .background(
+                            NavigationLink(
+                                destination: ManualControlView()
+                                    .onDisappear { showManualControl = false },
+                                isActive: $showManualControl,
+                                label: { EmptyView() }
+                            )
+                        )
 
                         // [新增] 恢复控制按钮（先隐藏，见 showsResumeControlButton）
                         if Self.showsResumeControlButton {
@@ -247,9 +263,9 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        // [新增] 本地按键锁定提示：加在 NavigationView 外层，进到视频分析 / 手动电子菜单页时也在最上面
+        // [新增] 底部轻提示：加在 NavigationView 外层，进到视频分析 / 手动电子菜单页时也在最上面
         .overlay(alignment: .bottom) {
-            if showsLockToast { LockToastView() }
+            if let toastText { ToastView(text: toastText) }
         }
     }
     
@@ -271,7 +287,7 @@ struct ContentView: View {
             onPause: {
                 // 锁定期间每按一次实体按键都会再通知一次 pause，只在「未暂停 → 暂停」时提示一次
                 if !self.isBluetoothPaused {
-                    self.showLockToast()
+                    self.showToast(String(localized: "设备正在本地控制，暂停app控制"), duration: 3.5)
                 }
                 self.isBluetoothPaused = true
             },
@@ -308,19 +324,28 @@ struct ContentView: View {
         BluetoothManager.shared.resumeAppControl()
     }
     
-    // [新增] 显示本地按键锁定提示，3.5 秒后自动消失（与 Android 的 Toast.LENGTH_LONG 一样长）
-    private func showLockToast() {
-        lockToastHideWork?.cancel()
+    // [新增] 手动电子菜单入口：蓝牙连上后才进入，没连上只提示（2 秒，与 Android 的 Toast.LENGTH_SHORT 一样长）
+    private func openManualControl() {
+        guard isBluetoothConnected else {
+            showToast(String(localized: "请先连接蓝牙设备"), duration: 2)
+            return
+        }
+        showManualControl = true
+    }
+
+    // [新增] 显示底部轻提示，到时自动消失。时长按 Android 的 Toast：LENGTH_LONG 3.5 秒、LENGTH_SHORT 2 秒
+    private func showToast(_ text: String, duration: TimeInterval) {
+        toastHideWork?.cancel()
         withAnimation(.easeOut(duration: 0.2)) {
-            showsLockToast = true
+            toastText = text
         }
         let work = DispatchWorkItem {
             withAnimation(.easeIn(duration: 0.2)) {
-                self.showsLockToast = false
+                self.toastText = nil
             }
         }
-        lockToastHideWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
+        toastHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 
     // NEW: 统一的更新检查入口（静默失败）
@@ -544,10 +569,12 @@ private struct RequiredUpdateView: View {
     }
 }
 
-// [新增] 本地按键锁定提示条（对应 Android 的 Toast）：底部圆角条，MD3 反色（浅色模式深底、深色模式浅底）
-private struct LockToastView: View {
+// [新增] 底部轻提示条（对应 Android 的 Toast）：底部圆角条，MD3 反色（浅色模式深底、深色模式浅底）
+private struct ToastView: View {
+    let text: String
+
     var body: some View {
-        Text("设备正在本地控制，暂停app控制")
+        Text(text)
             .font(.system(size: 14))
             .foregroundColor(.md3Surface)
             .multilineTextAlignment(.center)

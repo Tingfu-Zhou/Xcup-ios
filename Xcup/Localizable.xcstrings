@@ -794,6 +794,16 @@
         }
       }
     },
+    "请先连接蓝牙设备" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先に Bluetooth デバイスに接続してください"
+          }
+        }
+      }
+    },
     "转速 %lld RPM · 伸缩 %@ Hz" : {
       "localizations" : {
         "ja" : {
@@ -830,6 +840,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bluetooth デバイスに接続"
+          }
+        }
+      }
+    },
+    "连接蓝牙设备后可用" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth デバイスに接続すると使えます"
           }
         }
       }
