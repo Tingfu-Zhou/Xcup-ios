@@ -17,6 +17,12 @@
       "comment" : "Privacy - Bluetooth Always Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xcup uses Bluetooth to connect to and control your device."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -35,6 +41,12 @@
       "comment" : "Privacy - Bluetooth Peripheral Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xcup uses Bluetooth to connect to and control your device."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -53,6 +65,12 @@
       "comment" : "Privacy - Microphone Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Online Mode uses ReplayKit to capture screen and app audio. Microphone access is required, but microphone audio is not recorded."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -71,6 +89,12 @@
       "comment" : "Privacy - Photo Library Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow access to your photo library to select a video for analysis."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",

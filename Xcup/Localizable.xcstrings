@@ -6,6 +6,12 @@
     },
     "%lld 分钟" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld min"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -16,6 +22,12 @@
     },
     "%lld 分钟后" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld min"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -26,6 +38,12 @@
     },
     "+%lld 档" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%lld"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -36,6 +54,12 @@
     },
     "0 停止" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "0 Stop"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -46,6 +70,12 @@
     },
     "10 最强" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10 Max"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -56,6 +86,12 @@
     },
     "1200ms 反转 → 600ms 正转 → 1100ms 反转" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1200 ms reverse → 600 ms forward → 1100 ms reverse"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -66,6 +102,12 @@
     },
     "2000ms 反转 → 3000ms 正转" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2000 ms reverse → 3000 ms forward"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -76,6 +118,12 @@
     },
     "Extension 已连接 — 等待声音..." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected — Waiting for audio…"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -86,6 +134,12 @@
     },
     "⚠️ App Groups 未配置，数据无法传输" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⚠️ App Groups is not configured. Data cannot be transferred."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -96,6 +150,12 @@
     },
     "下发失败：参数无效" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t send command: Invalid settings"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -106,6 +166,12 @@
     },
     "下发失败：蓝牙未连接" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t send command: Bluetooth isn’t connected"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -116,6 +182,12 @@
     },
     "下发失败：设备正在本地按键控制" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t send command: Device controls are active"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -126,6 +198,12 @@
     },
     "为保证兼容性与稳定性，请更新到最新版。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please update to the latest version for better compatibility and stability."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -136,6 +214,12 @@
     },
     "为获得更佳体验，建议更新。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update for the best experience."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -146,6 +230,12 @@
     },
     "停止" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -156,6 +246,12 @@
     },
     "前往 App Store" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open App Store"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -166,6 +262,12 @@
     },
     "前往 App Store 更新" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update in App Store"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -176,6 +278,12 @@
     },
     "加档幅度" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Boost amount"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -186,6 +294,12 @@
     },
     "发现新版本 %@" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version %@ is available"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -196,6 +310,12 @@
     },
     "变频模式" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Motion Mode"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -206,6 +326,12 @@
     },
     "只有正转，持续同向抽送" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forward rotation only."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -216,6 +342,12 @@
     },
     "可以返回桌面，观看在线视频。如需退出在线分析，可点击屏幕上方通知栏「直播屏幕」，并点击停止按钮。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can return to your Home Screen and play an online video. To stop analysis, tap the red status indicator at the top of the screen, then tap “Stop”."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -226,6 +358,12 @@
     },
     "在 app 上直接调节模式与强度" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adjust the motion mode and intensity in the app"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -236,6 +374,12 @@
     },
     "在线分析中" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzing online video…"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -246,6 +390,12 @@
     },
     "在线分析中 — 等待声音..." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzing — Waiting for audio…"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -256,6 +406,12 @@
     },
     "在线分析已启动" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Online analysis started"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -266,6 +422,12 @@
     },
     "在线模式" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Online Mode"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -276,6 +438,12 @@
     },
     "在线视频模式" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Online Video Mode"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -286,6 +454,12 @@
     },
     "如需退出在线分析，可点击屏幕上方通知栏「直播屏幕」，并点击停止按钮。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To stop analysis, tap the red status indicator at the top of the screen, then tap “Stop”."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -296,6 +470,12 @@
     },
     "定时加档" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Climax Boost"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -306,6 +486,12 @@
     },
     "导出失败" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export failed"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -316,6 +502,12 @@
     },
     "尚未下发指令" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No command sent yet"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -326,6 +518,12 @@
     },
     "已下发：模式 %lld · 强度 %lld" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent: Mode %1$lld · Intensity %2$lld"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -336,6 +534,12 @@
     },
     "已下发：模式 %lld · 强度 0（停止）" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent: Mode %lld · Intensity 0 (Stopped)"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -346,6 +550,12 @@
     },
     "已切换到模式 %lld（强度为 0，未下发）" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to Mode %lld (not sent because intensity is 0)"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -356,6 +566,12 @@
     },
     "已切换到模式 %lld，视频分析正在运行，已即时生效" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to Mode %lld. The change took effect immediately because video analysis is running."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -366,6 +582,12 @@
     },
     "已发送恢复控制命令，等待设备确认…" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume command sent. Waiting for the device to respond…"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -376,6 +598,12 @@
     },
     "已发送紧急停止" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emergency stop command sent"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -386,6 +614,12 @@
     },
     "已恢复 App 控制" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App control resumed"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -396,6 +630,12 @@
     },
     "已暂停app操作，点击恢复" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App control paused. Tap to resume."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -406,6 +646,12 @@
     },
     "已连接" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -416,6 +662,12 @@
     },
     "已连接设备" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device Connected"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -426,6 +678,12 @@
     },
     "已连接，调节模式或强度后立即下发" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected. Mode and intensity changes are sent immediately."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -436,6 +694,12 @@
     },
     "建议将手机横屏并全屏播放视频，识别效果最佳。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For best recognition accuracy, turn your phone sideways and play the video full screen."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -446,6 +710,12 @@
     },
     "开始加档" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Boost starts in"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -456,6 +726,12 @@
     },
     "开始广播" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start Broadcast"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -466,6 +742,12 @@
     },
     "当前版本已不再受支持。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This version is no longer supported."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -476,6 +758,12 @@
     },
     "必须更新以继续使用" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An update is required to continue"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -486,6 +774,12 @@
     },
     "恢复控制" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume App Control"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -496,6 +790,12 @@
     },
     "手动电子菜单" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manual Controls"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -506,6 +806,12 @@
     },
     "扫描中..." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanning…"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -516,6 +822,12 @@
     },
     "扫描超时" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan timed out"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -526,6 +838,12 @@
     },
     "按下飞机杯上的实体按键后，设备会暂停响应 App 指令，点击下方按钮恢复 App 控制。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "After you press a button on the device, it stops responding to the app. Tap the button below to resume app control."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -536,6 +854,12 @@
     },
     "推荐观看方式" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recommended Viewing"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -546,6 +870,12 @@
     },
     "播放一段时间后自动加档" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatically increases intensity after a set time"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -556,6 +886,12 @@
     },
     "无法创建导出会话" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t create an export session"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -566,6 +902,12 @@
     },
     "无法加载视频数据" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t load video data"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -576,6 +918,12 @@
     },
     "无法获取视频资源" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t access the selected video"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -586,6 +934,12 @@
     },
     "未连接" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not connected"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -596,6 +950,12 @@
     },
     "模式 %lld" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode %lld"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -606,6 +966,12 @@
     },
     "模拟临近高潮 · 只作用于视频分析模式" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Video analysis only"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -616,6 +982,12 @@
     },
     "正在加载视频..." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading video…"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -626,6 +998,12 @@
     },
     "温馨提示" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tips"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -636,6 +1014,12 @@
     },
     "点击下方按钮，在弹出的系统对话框中选择「开始直播」即开始在线视频模式，可以返回桌面，观看在线视频。所有信息皆在本地处理，不会上传至服务器。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap the button below, then select “Start Broadcast” in the system prompt. Online Video Mode will begin. Return to your Home Screen to play an online video. All processing takes place on your device; no data is uploaded to a server."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -646,6 +1030,12 @@
     },
     "离开本页面不会自动停机，如需停止请点击「紧急停止」或将强度调至 0。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaving this screen won’t stop the device. Tap “Emergency Stop” or set intensity to 0 to stop it."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -656,6 +1046,12 @@
     },
     "稍后" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Later"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -666,6 +1062,12 @@
     },
     "紧急停止" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emergency Stop"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -676,6 +1078,12 @@
     },
     "紧急停止发送失败：蓝牙未连接" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t send emergency stop: Bluetooth isn’t connected"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -686,6 +1094,12 @@
     },
     "累计播放满 %lld 分钟后，视频分析给出的档位自动加 %lld 档（0 档仍为停止，最高 10 档）。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "After %1$lld min of playback, Climax Boost raises the intensity chosen by video analysis by %2$lld (0 stays stopped; maximum is 10)."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -696,6 +1110,12 @@
     },
     "蓝牙未连接，请先返回主页面连接设备" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth isn’t connected. Return to Home and connect your device."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -706,6 +1126,12 @@
     },
     "蓝牙状态: %@" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth status: %@"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -716,6 +1142,12 @@
     },
     "视频加载失败: %@" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t load video: %@"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -726,6 +1158,12 @@
     },
     "设备已断开连接" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device disconnected"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -736,6 +1174,12 @@
     },
     "设备已连接" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device connected"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -746,6 +1190,12 @@
     },
     "设备正在本地按键控制" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device controls are active"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -756,6 +1206,12 @@
     },
     "设备正在本地按键控制，已暂停 App 下发" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device controls are active. App commands have been paused."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -766,6 +1222,12 @@
     },
     "设备正在本地控制，暂停app控制" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The device is being controlled using its physical buttons. App control has been paused."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -776,6 +1238,12 @@
     },
     "该模式同时用于视频分析模式：分析只决定「转 / 不转」与强度档位，转动方式（正转 / 反转节拍）以这里的选择为准。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This motion pattern also applies during video analysis. Analysis determines only whether the motor runs and the intensity level. Rotation direction and timing follow the mode selected here."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -786,6 +1254,12 @@
     },
     "请先连接蓝牙设备" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect a Bluetooth device first"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -796,6 +1270,12 @@
     },
     "转速 %lld RPM · 伸缩 %@ Hz" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speed %1$lld RPM · Stroke %2$@ Hz"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -806,6 +1286,12 @@
     },
     "返回" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -816,6 +1302,12 @@
     },
     "返回主页面" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back to Home"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -826,6 +1318,12 @@
     },
     "连接蓝牙设备" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect Bluetooth Device"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -836,6 +1334,12 @@
     },
     "连接蓝牙设备后可用" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Available after connecting a Bluetooth device"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -846,6 +1350,12 @@
     },
     "退出提示" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How to Stop"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -856,6 +1366,12 @@
     },
     "适用于离线视频和在线录屏模式。暂停或没有声音时不计时；退出当前模式、视频播放完毕后重新计时（在线模式无法得知视频何时播完，连续静音约 10 秒即视为播完）。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Available in Local Video and Online Mode (screen recording). Pauses and periods without audio do not count toward the timer. The timer resets when you exit the mode or playback ends. In Online Mode, about 10 seconds of continuous silence is treated as the end of playback because the app cannot detect when a video ends."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -866,6 +1382,12 @@
     },
     "选择本地视频" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Local Video"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -876,6 +1398,12 @@
     },
     "部分浏览器（如 Chrome、Firefox）出于安全考虑，会自动将屏幕共享中的视频画面遮黑，并显示「为了安全起见，屏幕共享画面已隐藏此应用的内容」等提示。为了保证分析的准确性，录屏模式建议使用对应视频网站的官方 App 直接观看视频（部分 App 会禁止屏幕/音频抓取）。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Some browsers and apps restrict screen recording. If a video can’t be analyzed, try a different playback method."
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
@@ -886,6 +1414,12 @@
     },
     "马达强度" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Motor Intensity"
+          }
+        },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",

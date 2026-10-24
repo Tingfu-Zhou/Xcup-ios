@@ -17,18 +17,28 @@ struct RemoteVersionConfig: Decodable {
         let appStoreUrl: String
         let notes: String?
         let notesJa: String?    // 可选：日文界面用的更新说明，没填就用 notes
+        let notesEn: String?    // 可选：英文界面用的更新说明，没填就显示弹窗自带的英文默认说明
 
         enum CodingKeys: String, CodingKey {
             case latest, minSupported, appStoreUrl, notes
             case notesJa = "notes_ja"
+            case notesEn = "notes_en"
         }
 
-        /// 界面是日文、且配置里填了 notes_ja 时用日文说明；否则用 notes（没填 notes_ja 时与原来一样）
+        /// 按界面语言挑更新说明：日文界面填了 notes_ja 就用它，否则用 notes（与原来一样）；
+        /// 英文界面只用 notes_en，没填返回 nil，让弹窗显示自带的英文默认说明（中文 notes 英文用户看不懂）；
+        /// 其余界面用 notes
         var localizedNotes: String? {
-            if Bundle.main.preferredLocalizations.first == "ja", let ja = notesJa, !ja.isEmpty {
-                return ja
+            switch Bundle.main.preferredLocalizations.first ?? "" {
+            case "ja":
+                if let ja = notesJa, !ja.isEmpty { return ja }
+                return notes
+            case "en":
+                if let en = notesEn, !en.isEmpty { return en }
+                return nil
+            default:
+                return notes
             }
-            return notes
         }
     }
 }
