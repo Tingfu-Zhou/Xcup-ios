@@ -130,23 +130,6 @@ struct ContentView: View {
                                 }
                         }
 
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "info.circle.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(.md3Primary)
-                                .padding(.top, 1)
-                            Text("iOS 端暂不支持网页视频模式，请使用「在线视频模式」通过屏幕录制进行在线分析。")
-                                .font(MD3Typography.bodySmall)
-                                .foregroundColor(.md3OnSurfaceVariant)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.md3Surface)
-                        )
-
                         // [新增] 手动电子菜单入口：在 app 上直接调节模式与强度。
                         // 模式和强度都要通过蓝牙下发，所以要先在上面连上蓝牙设备才能进入（与 Android 一致）：
                         // 没连上时半透明、副文本提示先连接，点击只弹提示

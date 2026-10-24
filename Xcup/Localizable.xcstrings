@@ -19,7 +19,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld 分後"
+            "value" : "%lld分"
           }
         }
       }
@@ -80,16 +80,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "接続済み — 音声待ち…"
-          }
-        }
-      }
-    },
-    "iOS 端暂不支持网页视频模式，请使用「在线视频模式」通过屏幕录制进行在线分析。" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iOS 版は Web 動画モードに対応していません。「オンライン動画モード」で画面収録を使ってオンライン解析を行ってください。"
           }
         }
       }
@@ -169,7 +159,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "App Store へ"
+            "value" : "App Store を開く"
           }
         }
       }
@@ -189,7 +179,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "上げ幅"
+            "value" : "強度の上げ幅"
           }
         }
       }
@@ -199,7 +189,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "新しいバージョン %@"
+            "value" : "新しいバージョン %@ があります"
           }
         }
       }
@@ -219,7 +209,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正回転のみ。同じ方向に連続で動きます"
+            "value" : "正回転のみ。"
           }
         }
       }
@@ -309,7 +299,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "タイマーでレベルアップ"
+            "value" : "クライマックスブースト"
           }
         }
       }
@@ -459,7 +449,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "レベルアップ開始"
+            "value" : "ブースト開始まで"
           }
         }
       }
@@ -559,7 +549,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一定時間再生すると自動でレベルアップ"
+            "value" : "設定時間後に強度を自動アップ"
           }
         }
       }
@@ -619,7 +609,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "終盤の盛り上がりを再現 · 動画解析モードのみ"
+            "value" : "動画解析モード専用"
           }
         }
       }
@@ -639,7 +629,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ご注意"
+            "value" : "ご案内"
           }
         }
       }
@@ -709,7 +699,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bluetooth に接続されていません。ホーム画面に戻ってデバイスに接続してください"
+            "value" : "Bluetooth未接続です。ホーム画面に戻ってデバイスを接続してください。"
           }
         }
       }
@@ -839,7 +829,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bluetooth デバイスに接続"
+            "value" : "Bluetoothデバイスに接続"
           }
         }
       }
@@ -889,7 +879,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一部のブラウザ（Chrome、Firefox など）は、セキュリティ上の理由から画面共有中の動画を黒く塗りつぶし、「セキュリティのため、このアプリのコンテンツは画面共有で非表示になっています」などのメッセージを表示します。正確に解析するため、画面収録モードでは各動画サイトの公式アプリで動画を再生することをおすすめします（画面や音声の取得を禁止しているアプリもあります）。"
+            "value" : "一部のブラウザやアプリでは、画面収録が制限される場合があります。動画を正常に解析できない場合は、別の再生方法をお試しください。"
           }
         }
       }
@@ -899,7 +889,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "モーターの強さ"
+            "value" : "モーターの強度"
           }
         }
       }
