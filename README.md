@@ -30,11 +30,11 @@ Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在�
 | --- | --- | --- |
 | 本地视频分析 | 支持 | 支持 |
 | 在线/直播分析 | 支持 | 支持 |
-| 网页视频模式 | 支持 MP4/HLS | 当前不支持 |
+| 网页视频模式 | 已移除 | 不支持 |
 | 端侧视觉推理 | TensorFlow Lite | TensorFlow Lite |
 | 端侧音频推理 | YAMNet + 自定义分类器 | YAMNet + 自定义分类器 |
 | BLE | Android BLE API | CoreBluetooth |
-| 播放器 | VideoView/ExoPlayer | AVPlayer |
+| 播放器 | VideoView | AVPlayer |
 
 Android 版是本项目的上游实现参考。两端尽量保持模型输入、融合逻辑、动作映射和 BLE 行为一致，但受平台 API 与多媒体架构差异影响，部分实现并非逐行对应。
 
@@ -122,9 +122,9 @@ flowchart TB
 
 第三方预训练模型与相关资源仍受各自许可证和使用条款约束。自定义模型是否随仓库提供，请以 Xcode 工程中实际加入 App Target 的资源文件为准。
 
-## 平台差异：网页视频模式
+## 网页视频模式
 
-iOS 版当前不提供 Android 版的网页视频模式。
+两端都不提供网页视频模式：Android 版已在上架 Google Play 前移除（最后一版代码在 xcup-android 的 tag `web-video-archive`），iOS 版一直没有移植。下面是当初 iOS 没有移植的原因，留作参考。
 
 本地 MP4 和渐进式下载 MP4 可以通过 AVAssetReader 等公开 API 取得解码后的音频数据，满足 YAMNet 所需的 PCM 输入。对于 HLS 自适应码流，AVPlayer/CoreMedia 负责清单解析、码流选择、分片加载和解码；在本项目采用的公开 API 与播放架构下，无法像 Android ExoPlayer 一样，在完整 HLS 音频链路中稳定取得可供实时推理的 PCM 数据。
 
@@ -236,7 +236,7 @@ pod install
 
 ## 已知限制
 
-- 当前不支持网页视频模式，尤其不提供 Android 版基于 ExoPlayer 的 HLS 网页分析链路。
+- 不支持网页视频模式（Android 版也已移除）；网页上的视频可以用「在线视频模式」通过屏幕录制分析。
 - Photos 资源的导入行为可能涉及系统转码或临时文件准备，大体积视频的载入时间和内存占用取决于当前实现与设备状态。
 - BLE 协议和档位映射与具体硬件绑定，不能直接保证兼容其他设备。
 - 模型结果依赖训练数据分布，不应将分类输出视为对内容的绝对判断。

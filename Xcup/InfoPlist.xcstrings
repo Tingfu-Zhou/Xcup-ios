@@ -20,7 +20,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "スマートデバイスへの接続と操作に Bluetooth を使用します"
+            "value" : "スマートデバイスへの接続と操作にBluetoothを使用します"
           }
         },
         "zh-Hans" : {
@@ -38,7 +38,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "スマートデバイスへの接続と操作に Bluetooth を使用します"
+            "value" : "スマートデバイスへの接続と操作にBluetoothを使用します"
           }
         },
         "zh-Hans" : {

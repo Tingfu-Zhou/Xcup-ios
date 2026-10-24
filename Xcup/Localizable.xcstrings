@@ -9,7 +9,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld 分"
+            "value" : "%lld分"
           }
         }
       }
@@ -109,7 +109,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "送信に失敗しました：Bluetooth に接続されていません"
+            "value" : "送信に失敗しました：Bluetooth未接続です"
           }
         }
       }
@@ -229,7 +229,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "アプリでモードと強さを直接調整"
+            "value" : "アプリでモードと強度を直接調整"
           }
         }
       }
@@ -329,7 +329,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "送信済み：モード %1$lld · 強さ %2$lld"
+            "value" : "送信済み：モード %1$lld · 強度 %2$lld"
           }
         }
       }
@@ -339,7 +339,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "送信済み：モード %lld · 強さ 0（停止）"
+            "value" : "送信済み：モード %lld · 強度 0（停止）"
           }
         }
       }
@@ -349,7 +349,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "モード %lld に切り替えました（強さが 0 のため未送信）"
+            "value" : "モード %lld に切り替えました（強度が 0 のため未送信）"
           }
         }
       }
@@ -429,7 +429,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "接続済み。モードや強さを変更するとすぐに送信されます"
+            "value" : "接続済み。モードや強度を変更するとすぐに送信されます"
           }
         }
       }
@@ -649,7 +649,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "この画面を離れても自動では停止しません。止めるには「緊急停止」をタップするか、強さを 0 にしてください。"
+            "value" : "この画面を離れても自動では停止しません。止めるには「緊急停止」をタップするか、強度を 0 にしてください。"
           }
         }
       }
@@ -679,7 +679,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "緊急停止を送信できませんでした：Bluetooth に接続されていません"
+            "value" : "緊急停止を送信できませんでした：Bluetooth未接続です"
           }
         }
       }
@@ -689,7 +689,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "累計再生時間が %1$lld 分に達すると、動画解析で決まった強さが自動的に %2$lld レベル上がります（レベル 0 は停止のまま、最大はレベル 10）。"
+            "value" : "累計再生時間が %1$lld 分に達すると、動画解析で決まった強度が自動的に %2$lld レベル上がります（レベル 0 は停止のまま、最大はレベル 10）。"
           }
         }
       }
@@ -709,7 +709,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bluetooth の状態: %@"
+            "value" : "Bluetoothの状態: %@"
           }
         }
       }
@@ -779,7 +779,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このモードは動画解析でも使われます。解析で決まるのは「動かす／止める」と強さのレベルだけで、動き方（正回転／逆回転のリズム）はここで選んだモードに従います。"
+            "value" : "このモードは動画解析でも使われます。解析で決まるのは「動かす／止める」と強度のレベルだけで、動き方（正回転／逆回転のリズム）はここで選んだモードに従います。"
           }
         }
       }
@@ -789,7 +789,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "先に Bluetooth デバイスに接続してください"
+            "value" : "先にBluetoothデバイスに接続してください"
           }
         }
       }
@@ -839,7 +839,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bluetooth デバイスに接続すると使えます"
+            "value" : "Bluetoothデバイスに接続すると使えます"
           }
         }
       }
