@@ -1,21 +1,23 @@
 # Xcup iOS
 
+**中文** | [English](README.en.md)
+
 一个运行在 iOS 端的实时视频理解与 BLE 联动项目。
 
 Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在设备端识别动作状态和节律强度，经过融合仲裁与状态管理后，将控制指令发送给兼容的 BLE 硬件。
 
-本项目由 [Xcup Android](https://github.com/Tingfu-Zhou/xcup-android) 移植而来，保留了 Android 版的端侧推理、多模态融合、播放同步和 BLE 控制逻辑，并使用 AVFoundation、CoreBluetooth、Swift 与 GCD 等 Apple 平台技术重新实现。
+本项目由 [Xcup Android](https://github.com/Tingfu-Zhou/xcup-android) 移植而来，保留了 Android 版的端侧推理、多模态融合、播放同步和 BLE 控制逻辑，并使用 AVFoundation、ReplayKit、CoreBluetooth、Swift 与 GCD 等 Apple 平台技术重新实现。
 
 > 本项目涉及成人内容识别场景，仅面向成年人。请在遵守当地法律、内容授权、隐私保护和第三方平台规则的前提下使用。
 
 ## 功能概览
 
 - 本地视频分析：从系统照片或文件选择器载入视频，播放过程中同步分析画面与音频。
-- 在线/直播分析：提供与 Android 在线模式对应的实时画面分析能力。
-- 端侧视觉推理：使用 MobileNetV3Small TFLite 模型识别剧情、口部动作和性交动作三类画面。
+- 在线/直播分析：通过 ReplayKit 广播上传扩展（`XcupBroadcast`）录屏，取屏幕画面和其他 App 播放的声音；截屏先去掉视频四周的黑边，静音时暂停分析。
+- 端侧视觉推理：使用 MobileNetV3Small TFLite 模型识别剧情、口部动作和性交动作三类画面；每帧按训练素材的方式预处理（居中裁正方形 → 224 → 160）。
 - 端侧音频推理：使用 YAMNet 与自定义分类器识别动作类别；同一次推理还读取 YAMNet 自带的 AudioSet 521 类分数，判断这一刻音频靠不靠得住（音频线索：对白、音乐、安静、听不出、人声、拍打等）。
 - 节律强度估计：根据 PCM 音频生成离散强度档位，并与动作状态一同发送给硬件。
-- 多模态融合（融合仲裁 v2）：把马达的启动、维持、停止分开判断，证据按新推理结果计数；启动要两路佐证或持续的音频证据，维持只要任一路有支持，降低单模态误判造成的误转和动作中误停。启动时还参考音频线索：音频被背景音乐盖住、连续听不出时允许视频单独启动；视频确定是剧情时，对白引起的音频误判不算启动证据。
+- 多模态融合（融合仲裁 v2）：把马达的启动、维持、停止分开判断，证据按新推理结果计数；启动要两路佐证或持续的音频证据，维持只要任一路有支持。启动时还参考音频线索：音频被背景音乐盖住、连续听不出时允许视频单独启动；视频确定是剧情时，对白引起的音频误判不算启动证据。
 - BLE 控制：使用 CoreBluetooth 实现自动扫描、连接、协议帧构建、CRC 校验、状态解析和指令发送。
 - 手动电子菜单：在 App 内直接选择变频模式（1-3）与马达强度（0-10 档），无需在设备上轮询实体按键。要先在主页连上蓝牙设备才能进入，没连上时入口置灰，点击只提示。
 - 定时加档（在手动电子菜单里打开，默认关闭）：视频分析累计播放满设定时间（1-30 分钟）后，发给设备的档位自动 +1 / +2，模拟临近高潮；0 档仍为停止，最高 10 档。暂停、静音时不计时，退出当前模式或视频播完后重新计时。
@@ -29,14 +31,16 @@ Xcup iOS 会从本地视频或在线/直播画面中提取图像与音频，在�
 | 能力 | Android | iOS |
 | --- | --- | --- |
 | 本地视频分析 | 支持 | 支持 |
-| 在线/直播分析 | 支持 | 支持 |
+| 在线/直播分析 | MediaProjection + AudioPlaybackCapture | ReplayKit 广播上传扩展 |
 | 网页视频模式 | 已移除 | 不支持 |
-| 端侧视觉推理 | TensorFlow Lite | TensorFlow Lite |
+| 手动电子菜单、定时加档 | 支持 | 支持 |
+| 端侧视觉推理 | LiteRT（TensorFlow Lite） | TensorFlow Lite（`TensorFlowLiteSwift`） |
 | 端侧音频推理 | YAMNet + 自定义分类器 | YAMNet + 自定义分类器 |
 | BLE | Android BLE API | CoreBluetooth |
 | 播放器 | VideoView | AVPlayer |
+| 评测 CSV（`BenchLogger`） | debug 包自动开启 | 无 |
 
-Android 版是本项目的上游实现参考。两端尽量保持模型输入、融合逻辑、动作映射和 BLE 行为一致，但受平台 API 与多媒体架构差异影响，部分实现并非逐行对应。
+Android 版是本项目的上游实现参考。两端使用相同的模型文件，尽量保持模型输入、融合逻辑、动作映射和 BLE 行为一致；逐行移植的模块用 Android 生成的同一份对拍数据校验（见「运行测试」）。受平台 API 与多媒体架构差异影响，其余部分并非逐行对应。
 
 ## 工作原理
 
@@ -44,7 +48,7 @@ Android 版是本项目的上游实现参考。两端尽量保持模型输入、
 flowchart TB
     A["输入源<br/>本地视频 / 在线画面"] --> B["采集与解码<br/>视频帧 + PCM 音频"]
     B --> C["视觉分类<br/>MobileNetV3Small"]
-    B --> D["音频分类<br/>YAMNet + 自定义分类器"]
+    B --> D["音频分类 + 音频线索<br/>YAMNet + 自定义分类器"]
     B --> E["节律估计<br/>PCM → 档位"]
     C --> F["融合仲裁"]
     D --> F
@@ -66,18 +70,22 @@ flowchart TB
 | Android 实现 | iOS 实现 |
 | --- | --- |
 | `VideoProcessActivity.java` | `VideoProcessViewController.swift` |
-| VideoView / ExoPlayer | AVPlayer |
+| `OnlineAnalysisActivity.java` | `OnlineAnalysisViewController.swift` |
+| `ManualControlActivity.java` | `ManualControlView.swift` |
+| VideoView | AVPlayer |
 | MediaExtractor + MediaCodec（音频解码） | AVAssetReader + AVAssetReaderTrackOutput |
 | `VideoFrameExtractor.java` + `EGLRenderer.java`（抽帧） | `VideoFrameExtractor.swift`：AVPlayerItemVideoOutput + vImage |
 | `FramePreprocessor.java` | `FramePreprocessor.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐位校验） |
 | `ScreenCropper.java` | `ScreenCropper.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐帧校验） |
 | `OnlineAnalysisService.java`（MediaProjection 录屏） | `XcupBroadcast` 广播上传扩展（ReplayKit）：按 `RPVideoSampleOrientationKey` 转正，画面连同方向经 App Group 传给主 App |
 | Handler / Runnable | DispatchQueue、DispatchSourceTimer、CADisplayLink |
+| `PcmResampler.java` | `PcmResampler.swift`（逐行移植，`XcupTests` 逐样本对拍；广播扩展里有一份逐字拷贝） |
 | `PcmCircularBuffer.java` | `PcmCircularBuffer.swift` |
 | `FusionArbiter.java` | `FusionArbiter.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐 tick 校验） |
 | `AudioCue.java` | `AudioCue.swift`（逐行移植，`XcupTests` 用 Android 的对拍数据逐位校验分组分数和线索） |
 | `LevelBoost.java` | `LevelBoost.swift`（逐行移植，`XcupTests/LevelBoostTests` 与 Android `LevelBoostTest` 一一对应） |
 | `AudioInferenceHelper.java` | `AudioInferenceHelper.swift` |
+| `UpdateChecker.java` | `UpdateService.swift` |
 | Android BLE API | `BluetoothManager.swift` + CoreBluetooth |
 | `synchronized` / 原子变量 | DispatchQueue barrier、同步读取和线程安全结果容器 |
 
@@ -87,24 +95,33 @@ flowchart TB
 | --- | --- |
 | `ContentView.swift` | 主界面、视频选择、BLE 状态、在线分析入口和导航 |
 | `VideoProcessViewController.swift` | 视频播放、音视频分析、结果融合、UI 更新和 BLE 控制 |
+| `OnlineAnalysisViewController.swift` | 在线分析：读取广播扩展传来的画面与音频，静音检测，复用离线模式的推理与融合逻辑 |
+| `XcupBroadcast/BroadcastSampleHandler.swift` | 广播上传扩展：接收 ReplayKit 的画面和音频，把画面（连同方向）和重采样到 16 kHz 的音频写进 App Group 共享文件 |
+| `BroadcastBridge.swift` | 主 App 端读取广播扩展写入的画面和音频 |
 | `VideoFrameExtractor.swift` | 用 AVPlayerItemVideoOutput 取播放器此刻显示的那一帧，居中裁正方形、vImage 缩到 672×672 后交给 FramePreprocessor，并按 preferredTransform 转正 |
 | `FramePreprocessor.swift` | 视频模型输入的预处理（居中裁正方形、面积平均缩小到 160×160），与训练素材的处理一致，离线、在线两种模式共用 |
 | `ScreenCropper.swift` | 在线模式：在截屏里找出视频画面（去掉四周对称的黑边），再交给 `FramePreprocessor` 取视频画面的居中正方形 |
+| `VideoClassifierHelper.swift` | MobileNetV3Small TFLite 推理封装 |
 | `AudioDecoder.swift` | 使用 AVAssetReader 解码音频、限速、Seek 并写入 PCM 缓冲区 |
+| `PcmResampler.swift` | 流式下混与抗混叠重采样到 16 kHz，与 Android 逐样本一致 |
 | `PcmCircularBuffer.swift` | 管理 PCM 环形缓冲、时间窗口读取和并发访问 |
 | `AudioInferenceHelper.swift` | YAMNet 特征提取与自定义音频分类器推理；同一次推理取 AudioSet 521 类分数 |
 | `AudioCue.swift` | 音频线索：AudioSet 分数按含义分组求和，判对白 / 音乐 / 安静 / 听不出 / 人声 / 拍打 / 其它，交给融合仲裁的启动判断 |
-| `ThreadSafeAnalysisResults.swift` | 在线程之间安全保存和读取分析结果 |
+| `AudioLoudnessLevelEstimator.swift` | 音频响度、时间平滑、置信度与离散档位估计 |
+| `ThreadSafeAnalysisResults`（在 `VideoProcessViewController.swift` 里） | 在线程之间安全保存和读取分析结果 |
 | `FusionArbiter.swift` | 融合仲裁：根据两路的新推理结果（音频带线索）决定马达的启动、维持与停止，离线模式与在线模式共用 |
 | `LevelBoost.swift` | 定时加档：只累计分析在跑的时间，到点后发给设备的档位加 1 / 2 档（分析档位不变）；设置的键名与读取在 `LevelBoostSettings` |
 | `ManualControlView.swift` | 手动电子菜单：模式选择、强度滑杆、紧急停止与下发节流；定时加档的设置 |
 | `BluetoothManager.swift` | BLE 扫描、连接、协议帧编解码、CRC 校验和状态管理 |
+| `UpdateService.swift` | 拉取 `version.json` 的 `ios` 段，判断推荐更新或强制更新 |
+
+`InferenceHelper.swift`（ML Kit 姿态检测 + ST-GCN++）、`AudioRhythmEstimator.swift`、`VideoRhythmEstimator.swift`、`VideoMotionWaveEstimator.swift` 是早期方案留下的文件，当前代码已不再使用。
 
 ## 模型规格
 
 ### 视频模型
 
-- 骨干网络：MobileNetV3Small + Temporal Average Pooling + 三分类器
+- 骨干网络：MobileNetV3Small + Temporal Average Pooling + 三分类器（与 Android 使用同一个模型文件，2026-10-18 起为重训的 E1d 版）
 - 模型文件：`mobilenetv3small_tap_3class_float32.tflite`
 - 输入：`[1, 12, 160, 160, 3]`，`float32`，NHWC，RGB；12 帧是最近 3 秒里间隔 250ms 的 12 个不同时刻
 - 像素范围：`0-255`，模型内部包含 Rescaling，不应再次归一化
@@ -120,36 +137,25 @@ flowchart TB
 - iOS 注意事项：YAMNet 输入张量可能使用动态长度，复制 32,000 个采样点前应先将输入张量调整为正确形状，再分配张量内存
 - YAMNet 有 3 个输出（`[帧, 521]` AudioSet 分数、`[帧, 1024]` embedding、频谱图），代码按最后一维认输出，不写死下标；动态长度输入的输出张量要 invoke 之后才有数据，所以在第一次推理后认一次。模型里没有 521 维输出时线索一直是未知，融合仲裁退回 v1 的行为
 
-第三方预训练模型与相关资源仍受各自许可证和使用条款约束。自定义模型是否随仓库提供，请以 Xcode 工程中实际加入 App Target 的资源文件为准。
+第三方预训练模型与相关资源仍受各自许可证和使用条款约束。自定义模型是否随仓库提供，请以 Xcode 工程中实际加入 App Target 的资源文件（`Xcup/Models/`）为准。
 
 ## 网页视频模式
 
-两端都不提供网页视频模式：Android 版已在上架 Google Play 前移除（最后一版代码在 xcup-android 的 tag `web-video-archive`），iOS 版一直没有移植。下面是当初 iOS 没有移植的原因，留作参考。
+两端都不提供网页视频模式：Android 版已在上架 Google Play 前移除（最后一版代码在 xcup-android 的 tag `web-video-archive`），iOS 版一直没有移植。网页上的视频可以用在线模式通过录屏分析。
 
-本地 MP4 和渐进式下载 MP4 可以通过 AVAssetReader 等公开 API 取得解码后的音频数据，满足 YAMNet 所需的 PCM 输入。对于 HLS 自适应码流，AVPlayer/CoreMedia 负责清单解析、码流选择、分片加载和解码；在本项目采用的公开 API 与播放架构下，无法像 Android ExoPlayer 一样，在完整 HLS 音频链路中稳定取得可供实时推理的 PCM 数据。
-
-我们评估过 `MTAudioProcessingTap` 方案，但它不能为当前 HLS 多码率播放链路提供稳定、通用的 PCM 接入点。因此，为避免出现视频能够播放但音频分析不可用或结果不一致的情况，iOS 版暂不开放网页视频模式。
-
-这属于当前实现与平台公开接口的边界，并不表示 iOS 在任何架构下都无法分析 HLS。若未来引入自定义 HLS 下载、解复用与解码链路，可重新评估该功能。
-
-参考资料：
-
-- [Apple HTTP Live Streaming](https://developer.apple.com/streaming/)
-- [Apple MTAudioProcessingTap](https://developer.apple.com/documentation/mediatoolbox/mtaudioprocessingtap)
-- [Android Media3 ExoPlayer](https://developer.android.com/media/media3/exoplayer)
+当初没有移植的原因：本地 MP4 可以用 AVAssetReader 取得解码后的 PCM，但 HLS 自适应码流由 AVPlayer/CoreMedia 内部处理，在本项目采用的公开 API 与播放架构下（包括评估过的 `MTAudioProcessingTap`），无法像 Android ExoPlayer 一样稳定取得可供实时推理的 PCM。若未来引入自定义 HLS 下载、解复用与解码链路，可重新评估。
 
 ## 开始使用
 
 ### 环境要求
 
-- macOS 与项目所需版本的 Xcode
-- 项目 Deployment Target 支持的 iOS/iPadOS 真机
-- 有效的 Apple Developer 签名配置
-- 支持 BLE 的 iPhone 或 iPad
-- CocoaPods，以及项目所需的 TensorFlow Lite、ML Kit 等依赖
+- macOS 与 Xcode 16 或更高版本
+- iOS 17.6 及以上的 iPhone 或 iPad 真机（需支持 BLE）
+- 有效的 Apple Developer 签名配置（主 App 与 `XcupBroadcast` 扩展共用 App Group `group.com.aibei.Xcup`）
+- CocoaPods（`TensorFlowLiteSwift`；Podfile 里的 ML Kit 姿态检测是早期方案留下的，当前代码不再使用）
 - 与目标硬件一致的 BLE 服务、特征 UUID 和协议帧格式
 
-模拟器不适合完整验证 CoreBluetooth、实体设备控制、视频性能和真机生命周期行为，建议使用真机调试。
+模拟器不适合完整验证 CoreBluetooth、ReplayKit 录屏、实体设备控制、视频性能和真机生命周期行为，建议使用真机调试。
 
 ### 1. 获取代码
 
@@ -157,17 +163,17 @@ flowchart TB
 
 ### 2. 安装依赖
 
-如果仓库包含 `Podfile`，在项目目录执行：
+在项目目录执行：
 
 ```bash
 pod install
 ```
 
-完成后打开 `.xcworkspace`，不要直接打开 `.xcodeproj`。
+完成后打开 `Xcup.xcworkspace`，不要直接打开 `.xcodeproj`。
 
 ### 3. 准备模型
 
-确认视频模型、YAMNet 和自定义音频分类器已经加入 Xcode 工程，并勾选正确的 App Target。模型文件必须被复制到最终 App Bundle，且文件名应与代码中的加载路径一致。
+确认 `Xcup/Models/` 里的视频模型、YAMNet 和自定义音频分类器已经加入 Xcode 工程，并勾选正确的 App Target。模型文件必须被复制到最终 App Bundle，且文件名应与代码中的加载路径一致。
 
 ### 4. 配置 BLE
 
@@ -183,21 +189,44 @@ pod install
 
 ### 5. 配置权限与签名
 
-在 Target 的 Signing & Capabilities 以及 `Info.plist` 中确认蓝牙、照片/文件访问及在线模式所需权限。蓝牙用途说明至少应与实际功能一致，例如：
+在 Target 的 Signing & Capabilities 以及 `Info.plist` 中确认蓝牙、照片/文件访问、麦克风（ReplayKit 录制系统音频时需要）及 App Groups。蓝牙用途说明至少应与实际功能一致，例如：
 
 ```xml
 <key>NSBluetoothAlwaysUsageDescription</key>
 <string>本应用需要使用蓝牙连接和控制智能设备。</string>
 ```
 
-请根据实际 Deployment Target 判断是否仍需兼容旧版蓝牙权限键，不要添加与功能无关的权限。
+不要添加与功能无关的权限。
 
-### 6. 构建与运行
+### 6. 配置更新地址（可选）
 
-1. 在 Xcode 中选择正确的 App Target。
+`UpdateService.swift` 读取与 Android 版共用的 `version.json` 里的 `ios` 段：
+
+```json
+{
+  "ios": {
+    "latest": "1.2.1",
+    "minSupported": "1.2.0",
+    "appStoreUrl": "https://apps.apple.com/app/idXXXXXXXXXX",
+    "notes": "修复问题并提升性能",
+    "notes_ja": "不具合の修正とパフォーマンスの向上",
+    "notes_en": "Bug fixes and performance improvements"
+  }
+}
+```
+
+`notes_ja`、`notes_en` 可选：界面是日文时显示 `notes_ja`，没填就显示 `notes`；界面是英文时显示 `notes_en`，没填就显示弹窗自带的英文默认说明（不显示中文的 `notes`）。
+
+### 7. 构建与运行
+
+1. 在 Xcode 中选择 `Xcup` Scheme。
 2. 设置 Team、Bundle Identifier、Version 和 Build。
 3. 连接 iPhone 或 iPad 真机。
 4. 执行 Build & Run。
+
+### 8. 运行测试
+
+在 Xcode 中按 ⌘U 运行 `XcupTests`。`FusionArbiterTests`、`AudioCueTests`、`PcmResamplerTests`、`FramePreprocessorTests`、`ScreenCropperTests`、`LevelBoostTests` 使用 Android 端生成的对拍数据，校验两端逐位、逐 tick 一致。改这些模块时，Android、`bench/tools/` 里的 Python 版和这里要一起改，再由 Android 端重新生成对拍数据。
 
 ## 多语言
 
@@ -208,9 +237,7 @@ pod install
 
 新增界面文字时：SwiftUI 的 `Text("中文")`、`Label("中文", systemImage:)` 等在编译时会自动收进 `Localizable.xcstrings`，在 Xcode 里补上日语和英语即可；UIKit 控件的文字、或先存进 `String` 变量再显示的文字，要写成 `String(localized: "中文")`，否则不会被翻译。带插值的文字（如 `"\(n) 分钟后"`）在表里显示为 `%lld 分钟后`，日语、英语译文保留同样的占位符。只在调试悬浮窗和日志里出现的文字不需要翻译。
 
-英文按北美用法：按钮和标题用 Title Case（如 Emergency Stop），提示句只有句首大写；撇号和引号用 ’ “ ”。
-
-更新弹窗的说明来自 `version.json` 的 `ios` 段：可以加 `notes_ja`、`notes_en`。界面是日文时显示 `notes_ja`，没填就显示 `notes`；界面是英文时显示 `notes_en`，没填就显示弹窗自带的英文默认说明（不显示中文的 `notes`）。
+英文按北美用法，与 Android 版一致：按钮和标题用 Title Case（如 Emergency Stop），提示句只有句首大写；撇号和引号用 ’ “ ”。
 
 ## 使用流程
 
@@ -223,10 +250,16 @@ pod install
 
 ### 在线/直播分析
 
-1. 进入在线分析模式并完成系统要求的授权。开始广播后页面只显示「在线分析已启动」（Debug 构建左上角另有 V / A / Final 三行调试信息，Release 包不显示），不显示录到的画面（录屏也会录到这个页面，再显示出来就是画面里套画面），与 Android 相同。
-2. 启动需要分析的实时画面来源。横屏全屏播放时，截到的画面与训练素材的取法一致，识别效果最好。
-3. 应用持续执行画面、音频、融合和 BLE 控制链路。截屏里视频四周的黑边（竖屏全屏播放、横屏看竖屏视频）先去掉再居中裁剪；转屏后 12 帧窗口清空重攒，约 3.5 秒后出第一个视频结果。
-4. 退出在线模式时停止分析并向硬件发送停止状态。
+1. 进入在线分析模式，点按钮后在系统弹窗里选「开始直播」。开始广播后页面只显示「在线分析已启动」（Debug 构建左上角另有 V / A / Final 三行调试信息，Release 包不显示），不显示录到的画面（录屏也会录到这个页面，再显示出来就是画面里套画面），与 Android 相同。
+2. 返回桌面，播放需要分析的视频。横屏全屏播放时，截到的画面与训练素材的取法一致，识别效果最好。
+3. 应用持续执行画面、音频、融合和 BLE 控制链路。截屏里视频四周的黑边（竖屏全屏播放、横屏看竖屏视频）先去掉再居中裁剪；转屏后 12 帧窗口清空重攒，约 3.5 秒后出第一个视频结果。没有声音时暂停分析，声音恢复后继续。
+4. 点屏幕上方的录屏状态指示，再点「停止」即可退出在线分析，应用会停止分析并向硬件发送停止状态。
+
+### 手动控制
+
+1. 在主界面连接 BLE 设备后进入「手动电子菜单」。
+2. 选择变频模式、拖动强度滑杆，或点「紧急停止」。
+3. 设备被本地按键锁定时，可在这里点「恢复控制」；定时加档也在这里打开。
 
 ## 蓝牙协议
 
@@ -239,6 +272,7 @@ pod install
 ## 已知限制
 
 - 不支持网页视频模式（Android 版也已移除）；网页上的视频可以用「在线视频模式」通过屏幕录制分析。
+- 在线模式去黑边时，片源自带的对称黑边也会被裁掉；背景不是纯黑的播放器不裁。
 - Photos 资源的导入行为可能涉及系统转码或临时文件准备，大体积视频的载入时间和内存占用取决于当前实现与设备状态。
 - BLE 协议和档位映射与具体硬件绑定，不能直接保证兼容其他设备。
 - 模型结果依赖训练数据分布，不应将分类输出视为对内容的绝对判断。
@@ -249,6 +283,7 @@ pod install
 - 音视频识别链路设计为端侧推理；如二次开发中加入日志上传、统计分析或云端推理，应明确告知用户并取得必要授权。
 - 仅分析你有权访问和处理的内容，不得处理涉及未成年人、偷拍、胁迫或其他违法内容。
 - 视频导入、屏幕采集和音频处理应遵守当地法律、内容版权、App Store 规则及目标服务的使用条款。
+- 隐私政策与 Android 版共用 `https://download.xswy.tech/privacy.html`；改了权限或数据处理方式，要同时更新它和 App Store Connect 里的隐私信息。
 - 接入实体硬件前请增加强度上限、停止指令、连接异常处理和人工中止机制，并充分测试。
 
 ## 贡献
@@ -262,7 +297,7 @@ pod install
 
 ## 相关项目
 
-- [Xcup Android](https://github.com/Tingfu-Zhou/xcup-android)：本项目的 Android 上游实现
+- [Xcup Android](https://github.com/Tingfu-Zhou/xcup-android)：本项目的 Android 上游实现（评测基准 `bench/` 和视频模型训练 `training/` 也在那里）
 - [Xcup Bluetooth Protocol](https://github.com/Tingfu-Zhou/Xcup-Bluetooth-protocol)：第一批硬件使用的 BLE 协议资料与参考实现
 
 ## 许可证
@@ -277,6 +312,7 @@ Apache License 2.0 不授予对 Xcup 名称、商标、产品图片、Logo 或�
 
 - [AVFoundation](https://developer.apple.com/av-foundation/)
 - [Core Bluetooth](https://developer.apple.com/documentation/corebluetooth)
+- [ReplayKit](https://developer.apple.com/documentation/replaykit)
 - [LiteRT / TensorFlow Lite for iOS](https://ai.google.dev/edge/litert/ios/quickstart)
 - [MobileNetV3Small](https://www.tensorflow.org/api_docs/python/tf/keras/applications/MobileNetV3Small)
 - [YAMNet](https://www.tensorflow.org/hub/tutorials/yamnet)
